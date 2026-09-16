@@ -2245,49 +2245,46 @@
                             profile
                         ])
                     );
-                    html += `<div class="space-y-4">`;
-                    for (const ev of events) {
-                        const { data: attendanceData, error: attError } = await supabaseClient
-                            .from('event_responses')
-                            .select('status, excuse, user_email')
-                            .eq('event_id', ev.id);
+                    const { data: allAttendance, error: allAttError } = await supabaseClient
+                        .from('event_responses')
+                        .select('status, excuse, user_email, event_id');
+                    if (allAttError) {
+                        html += `<div class="bg-red-900/40 border border-red-700/60 text-red-200 p-3 rounded-xl text-xs mb-3">Σφάλμα φόρτωσης παρουσιών: ${escapeHtml(allAttError.message || 'Άγνωστο σφάλμα')}</div>`;
+                    }
+                    const responsesByEvent = new Map();
+                    (allAttendance || []).forEach(row => {
+                        if (!responsesByEvent.has(row.event_id)) responsesByEvent.set(row.event_id, []);
+                        responsesByEvent.get(row.event_id).push(row);
+                    });
 
-                        if (attError) {
-                            console.error(`Αδυναμία φόρτωσης παρουσιών για την εκδήλωση ${ev.id}:`, attError);
-                        }
-                        const eventResponses = attendanceData || [];
+                    const renderAttendanceCard = (ev) => {
+                        const eventResponses = responsesByEvent.get(ev.id) || [];
                         const goingList = eventResponses.filter(r => String(r.status).toLowerCase() === 'going');
                         const notGoingList = eventResponses.filter(r => String(r.status).toLowerCase() === 'not going');
-                        if (attError) {
-                            html += `<div class="bg-red-900/40 border border-red-700/60 text-red-200 p-3 rounded-xl text-xs mb-3">Σφάλμα φόρτωσης παρουσιών: ${escapeHtml(attError.message || 'Άγνωστο σφάλμα')}</div>`;
-                        }
-
                         const formattedDate = formatGreekDateOnly(ev.date);
                         const dateTimeDisplay = ev.time ? `${formattedDate}, ${escapeHtml(formatEventTime(ev.time))}` : `${formattedDate} (Ώρα αναμένεται)`;
                         const typeBadge = ev.event_type ? `<span class="shrink-0 max-w-[42%] text-right bg-slate-700 text-indigo-300 px-2 py-0.5 rounded text-[10px] font-semibold whitespace-pre-line leading-tight">${escapeHtml(ev.event_type)}</span>` : '';
-
-                        html += `
+                        return `
                             <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
                                 <div class="flex justify-between items-start mb-1">
                                     <h3 class="font-bold text-base text-white">${escapeHtml(ev.event_name)}</h3>
                                     ${typeBadge}
                                 </div>
                                 <p class="text-xs text-indigo-300 mb-3">📅 ${dateTimeDisplay}</p>
-                                
                                 <div class="grid grid-cols-2 gap-2 mb-3 text-xs">
                                     <div class="bg-slate-900 p-2.5 rounded border border-slate-700/60">
                                         <span class="text-emerald-400 font-semibold block mb-1">✅ Θα πάνε (${goingList.length})</span>
-                                        ${goingList.length === 0 ? '<span class="text-slate-500 italic">Καμία δήλωση</span>' : 
+                                        ${goingList.length === 0 ? '<span class="text-slate-500 italic">Καμία δήλωση</span>' :
                                           goingList.map(r => {
                                             const profile = profilesByEmail.get(String(r.user_email || '').trim().toLowerCase());
                                             const fullName = `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || r.user_email;
                                             const instrument = profile?.instrument ? ` (${profile.instrument})` : '';
                                             return `<div class="text-slate-300 truncate">• ${escapeHtml(fullName)}${escapeHtml(instrument)}</div>`;
-                                        }).join('')}
+                                          }).join('')}
                                     </div>
                                     <div class="bg-slate-900 p-2.5 rounded border border-slate-700/60">
                                         <span class="text-red-400 font-semibold block mb-1">❌ Απόντες (${notGoingList.length})</span>
-                                        ${notGoingList.length === 0 ? '<span class="text-slate-500 italic">Κανένας</span>' : 
+                                        ${notGoingList.length === 0 ? '<span class="text-slate-500 italic">Κανένας</span>' :
                                           notGoingList.map(r => {
                                             const profile = profilesByEmail.get(String(r.user_email || '').trim().toLowerCase());
                                             const fullName = `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || r.user_email;
@@ -2298,8 +2295,17 @@
                                 </div>
                             </div>
                         `;
+                    };
+
+                    const upcoming = events.filter(ev => !isPastEvent(ev));
+                    const past = events.filter(ev => isPastEvent(ev));
+                    if (past.length) {
+                        html += `<details class="mb-6 bg-slate-800/40 rounded-xl border border-slate-700"><summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-300">Προηγούμενες εκδηλώσεις (${past.length})</summary><div class="space-y-4 p-4 pt-0">${past.map(renderAttendanceCard).join('')}</div></details>`;
                     }
-                    html += `</div>`;
+                    if (upcoming.length) html += `<div class="space-y-4">${upcoming.map(renderAttendanceCard).join('')}</div>`;
+                    if (!upcoming.length && !past.length) {
+                        html += `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">Δεν υπάρχουν εκδηλώσεις.</div>`;
+                    }
                 }
             } else {
                 html += `<p class="text-xs text-slate-400 mb-4">Το προσωπικό σας ιστορικό συμμετοχών και αιτιολογιών απουσίας.</p>`;
