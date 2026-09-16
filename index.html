@@ -568,19 +568,23 @@
         async function fetchProfile() {
             if (!currentUser) return;
             
-            let { data, error } = await supabaseClient
+            let { data } = await supabaseClient
                 .from('profiles')
                 .select('*')
                 .eq('id', currentUser.id)
-                .single();
+                .maybeSingle();
 
-            if (!data && currentUser.email) {
-                const { data: dataByEmail } = await supabaseClient
+            const nameMissing = !(data?.first_name || '').trim() && !(data?.last_name || '').trim();
+            if ((!data || nameMissing || !['admin', 'conductor', 'musician'].includes(data.role)) && currentUser.email) {
+                const { data: byEmail } = await supabaseClient
                     .from('profiles')
                     .select('*')
-                    .eq('email', currentUser.email)
-                    .single();
-                if (dataByEmail) data = dataByEmail;
+                    .ilike('email', currentUser.email);
+                const named = (byEmail || []).sort((a, b) => {
+                    const rank = (p) => (p.role === 'admin' ? 3 : p.role === 'conductor' ? 2 : ((p.first_name || '').trim() ? 1 : 0));
+                    return rank(b) - rank(a);
+                })[0];
+                if (named) data = { ...named, id: data?.id || named.id };
             }
 
             if (data) {
@@ -628,6 +632,11 @@
 
         function isConductorRole() {
             return currentProfile?.role === 'conductor';
+        }
+
+        function isMusicianRole() {
+            const role = (currentProfile?.role || '').toLowerCase();
+            return !isAdminRole() && !isConductorRole() && (role === 'musician' || role === 'member' || !role);
         }
 
         function isPrivilegedRole() {
