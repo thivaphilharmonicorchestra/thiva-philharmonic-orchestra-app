@@ -1,14 +1,17 @@
 <!DOCTYPE html>
-<html lang="el">
+<html lang="el" style="color-scheme: dark; background-color: #0f172a;">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Φιλαρμονική Ορχήστρα Θήβας</title>
     
     <!-- PWA / Native App Meta Tags & Dynamic Icon Manifest -->
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Φιλαρμονική Θήβας">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#0f172a">
     <link rel="apple-touch-icon" href="./thiva_app_icon.png">
     <link rel="manifest" id="pwa-manifest">
 
@@ -21,7 +24,6 @@
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     </script>
-    <meta name="theme-color" content="#1e293b">
     <style>
         .pdf-viewer-container, .modal-content {
             width: 100vw;
@@ -41,22 +43,19 @@
             border: none;
         }
         .app-navbar {
-            bottom: max(10px, env(safe-area-inset-bottom));
+            bottom: 0;
+            padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
         }
-        .app-navbar::after {
-            content: '';
-            position: absolute;
-            z-index: 0;
-            top: 100%;
-            left: 0;
-            right: 0;
-            height: max(10px, env(safe-area-inset-bottom));
-            background: rgba(30, 41, 59, 0.95);
-            pointer-events: none;
+        html {
+            color-scheme: dark;
+            background-color: #0f172a;
         }
         html, body {
             touch-action: manipulation;
             overscroll-behavior-y: none;
+            background-color: #0f172a;
+            min-height: 100%;
+            min-height: 100dvh;
         }
         #app,
         #content {
@@ -332,7 +331,7 @@
             "start_url": ".",
             "display": "standalone",
             "background_color": "#0f172a",
-            "theme_color": "#1e293b",
+            "theme_color": "#0f172a",
             "icons": [
                 { "src": APP_ICON_URL, "sizes": "1024x1024", "type": "image/png", "purpose": "any" },
                 { "src": ANDROID_ICON_URL, "sizes": "1024x1024", "type": "image/png", "purpose": "maskable" }
