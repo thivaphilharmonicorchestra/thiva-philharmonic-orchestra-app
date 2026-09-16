@@ -254,7 +254,13 @@
         const SUPABASE_URL = 'https://jigwfebaxiqumrltkgli.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_ORpUPeW5OSBOwTCTIKhPUw_SX8DtV9Z';
 
-        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            auth: {
+                detectSessionInUrl: true,
+                persistSession: true,
+                autoRefreshToken: true
+            }
+        });
 
         const LOGO_URL = 'https://raw.githubusercontent.com/thivaphilharmonic-maker/thiva-philharmonic-orchestra-app/main/logo.png';
         const APP_ICON_URL = './thiva_app_icon.png';
@@ -409,35 +415,86 @@
             viewerHistoryActive = false;
             closePdfViewer(true);
         });
+        let requirePasswordSetup = false;
+        let passwordSetupMode = 'invite';
         let serviceWorkerRegistration = null;
+
+        function appRedirectUrl() {
+            const path = window.location.pathname.replace(/index\.html$/i, '');
+            return `${window.location.origin}${path}`;
+        }
+
+        function authCallbackParams() {
+            const search = new URLSearchParams(window.location.search);
+            const hash = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
+            return {
+                type: (search.get('type') || hash.get('type') || '').toLowerCase(),
+                code: search.get('code') || hash.get('code'),
+                error: search.get('error') || hash.get('error'),
+                errorDescription: search.get('error_description') || hash.get('error_description')
+            };
+        }
+
+        function isPasswordSetupCallback(cb = authCallbackParams()) {
+            return ['invite', 'recovery', 'signup'].includes(cb.type) || !!cb.code;
+        }
+
+        function clearAuthCallbackFromUrl() {
+            const clean = window.location.pathname;
+            history.replaceState({}, document.title, clean);
+        }
+
+        async function completeAuthFromUrl() {
+            const cb = authCallbackParams();
+            if (cb.error) {
+                return {
+                    session: null,
+                    type: cb.type,
+                    error: decodeURIComponent((cb.errorDescription || cb.error).replace(/\+/g, ' '))
+                };
+            }
+            if (cb.code) {
+                const { error } = await supabaseClient.auth.exchangeCodeForSession(cb.code);
+                if (error && !/already|session/i.test(error.message || '')) {
+                    const { data: { session } } = await supabaseClient.auth.getSession();
+                    if (!session) return { session: null, type: cb.type, error: error.message };
+                }
+            }
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            return { session, type: cb.type, error: null };
+        }
 
         async function init() {
             registerServiceWorker();
             initPushSupport();
             if (window.location.hash === '#notifications') activeTab = 'notifications';
 
-            if (window.location.hash.includes('type=invite') || window.location.hash.includes('type=recovery')) {
-                renderSetPasswordScreen();
-                return;
+            const callback = isPasswordSetupCallback();
+            const cbInfo = authCallbackParams();
+            if (callback) {
+                requirePasswordSetup = true;
+                passwordSetupMode = cbInfo.type === 'recovery' ? 'recovery' : 'invite';
             }
+            const { session, type, error } = await completeAuthFromUrl();
 
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            if (session) {
-                currentUser = session.user;
-                await fetchProfile();
-                renderApp();
-            } else {
-                renderLogin();
-            }
-
-            supabaseClient.auth.onAuthStateChange(async (event, session) => {
-                if (event === 'PASSWORD_RECOVERY' || window.location.hash.includes('type=invite')) {
+            supabaseClient.auth.onAuthStateChange(async (event, nextSession) => {
+                if (event === 'PASSWORD_RECOVERY') {
+                    requirePasswordSetup = true;
+                    passwordSetupMode = 'recovery';
+                    if (nextSession) currentUser = nextSession.user;
+                    renderSetPasswordScreen();
+                    return;
+                }
+                if (requirePasswordSetup && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
+                    if (nextSession) currentUser = nextSession.user;
                     renderSetPasswordScreen();
                     return;
                 }
 
-                if (session) {
-                    currentUser = session.user;
+                if (requirePasswordSetup) return;
+
+                if (nextSession) {
+                    currentUser = nextSession.user;
                     await fetchProfile();
                     renderApp();
                 } else {
@@ -446,6 +503,27 @@
                     renderLogin();
                 }
             });
+
+            if (error) {
+                renderLogin(error);
+                return;
+            }
+
+            if (callback || type === 'invite' || type === 'recovery' || type === 'signup') {
+                requirePasswordSetup = true;
+                passwordSetupMode = type === 'recovery' ? 'recovery' : 'invite';
+                if (session) currentUser = session.user;
+                renderSetPasswordScreen(session ? '' : 'Ο σύνδεσμος άνοιξε, αλλά δεν ολοκληρώθηκε η είσοδος. Δοκιμάστε ξανά από το email, ή ζητήστε νέα πρόσκληση.');
+                return;
+            }
+
+            if (session) {
+                currentUser = session.user;
+                await fetchProfile();
+                renderApp();
+            } else {
+                renderLogin();
+            }
         }
 
         function registerServiceWorker() {
@@ -638,7 +716,7 @@
             return trimmedName;
         }
 
-        function renderLogin() {
+        function renderLogin(message = '') {
             document.getElementById('navbar').classList.add('hidden');
             document.getElementById('content').innerHTML = `
                 <div class="flex flex-col items-center justify-center min-h-[85vh] text-center">
@@ -649,48 +727,98 @@
                         <input type="email" id="email" placeholder="Διεύθυνση Email" class="w-full mb-3 p-3 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-indigo-500">
                         <input type="password" id="password" placeholder="Κωδικός πρόσβασης" class="w-full mb-4 p-3 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-indigo-500">
                         <button onclick="handleLogin()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold p-3 rounded-lg transition text-sm">Σύνδεση</button>
+                        <button onclick="handleForgotPassword()" class="w-full mt-2 bg-transparent text-indigo-300 hover:text-white text-xs font-medium py-2">Ξεχάσατε τον κωδικό;</button>
                     </div>
-                    <p id="error-msg" class="text-red-400 mt-4 text-sm"></p>
+                    <p id="error-msg" class="text-red-400 mt-4 text-sm">${escapeHtml(message)}</p>
+                    <p id="info-msg" class="text-emerald-400 mt-2 text-sm"></p>
                 </div>
             `;
         }
 
-        function renderSetPasswordScreen() {
+        function renderSetPasswordScreen(errorMessage = '') {
+            const isRecovery = passwordSetupMode === 'recovery';
+            const isChange = passwordSetupMode === 'change';
+            const title = isChange ? 'Αλλαγή κωδικού' : (isRecovery ? 'Νέος κωδικός πρόσβασης' : 'Δημιουργία κωδικού πρόσβασης');
+            const subtitle = isChange
+                ? 'Ορίστε τον νέο κωδικό για τον λογαριασμό σας.'
+                : (isRecovery
+                    ? 'Ορίστε έναν νέο κωδικό για να συνδεθείτε ξανά στην εφαρμογή.'
+                    : 'Καλώς ήρθατε. Ορίστε τον κωδικό σας για να ολοκληρώσετε την πρόσκληση.');
             document.getElementById('navbar').classList.add('hidden');
             document.getElementById('content').innerHTML = `
                 <div class="flex flex-col items-center justify-center min-h-[85vh] text-center">
                     <img src="${LOGO_URL}" alt="Logo" class="w-20 h-20 mb-3 object-contain drop-shadow-md">
-                    <h1 class="text-2xl font-bold text-indigo-400 mb-2">Δημιουργία Κωδικού Πρόσβασης</h1>
-                    <p class="text-slate-400 mb-6 text-sm">Καλώς ήρθατε! Ορίστε τον κωδικό πρόσβασής σας για να ολοκληρώσετε την εγγραφή σας στην εφαρμογή.</p>
+                    <h1 class="text-2xl font-bold text-indigo-400 mb-2">${title}</h1>
+                    <p class="text-slate-400 mb-6 text-sm">${subtitle}</p>
                     <div class="w-full bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-                        <input type="password" id="new-password" placeholder="Νέος Κωδικός (τουλάχιστον 6 χαρακτήρες)" class="w-full mb-4 p-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-indigo-500 text-sm">
-                        <button onclick="handleSetPassword()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold p-3 rounded-lg transition text-sm">Αποθήκευση & Είσοδος</button>
+                        <input type="password" id="new-password" placeholder="Νέος κωδικός (τουλάχιστον 6 χαρακτήρες)" class="w-full mb-3 p-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-indigo-500 text-sm">
+                        <input type="password" id="new-password-confirm" placeholder="Επιβεβαίωση κωδικού" class="w-full mb-4 p-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-indigo-500 text-sm">
+                        <button onclick="handleSetPassword()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold p-3 rounded-lg transition text-sm">${isChange ? 'Αποθήκευση κωδικού' : 'Αποθήκευση & Είσοδος'}</button>
+                        ${isChange ? `<button onclick="requirePasswordSetup = false; passwordSetupMode = 'invite'; renderApp();" class="w-full mt-2 text-slate-400 text-xs py-2">Άκυρο</button>` : ''}
                     </div>
-                    <p id="password-error-msg" class="text-red-400 mt-4 text-sm"></p>
+                    <p id="password-error-msg" class="text-red-400 mt-4 text-sm">${escapeHtml(errorMessage || '')}</p>
                 </div>
             `;
         }
 
         async function handleSetPassword() {
             const password = document.getElementById('new-password').value;
+            const confirm = document.getElementById('new-password-confirm').value;
+            const errEl = document.getElementById('password-error-msg');
             if (!password || password.length < 6) {
-                document.getElementById('password-error-msg').innerText = 'Ο κωδικός πρέπει να έχει τουλάχιστον 6 χαρακτήρες.';
+                errEl.innerText = 'Ο κωδικός πρέπει να έχει τουλάχιστον 6 χαρακτήρες.';
+                return;
+            }
+            if (password !== confirm) {
+                errEl.innerText = 'Οι δύο κωδικοί δεν ταιριάζουν.';
                 return;
             }
 
             const { error } = await supabaseClient.auth.updateUser({ password });
             if (error) {
-                document.getElementById('password-error-msg').innerText = error.message;
-            } else {
-                alert('Ο κωδικός αποθηκεύτηκε επιτυχώς!');
-                window.location.hash = '';
-                const { data: { session } } = await supabaseClient.auth.getSession();
-                if (session) {
-                    currentUser = session.user;
-                    await fetchProfile();
-                    renderApp();
-                }
+                errEl.innerText = error.message === 'Auth session missing!'
+                    ? 'Ο σύνδεσμος έληξε ή δεν είναι έγκυρος. Ζητήστε νέα πρόσκληση ή επαναφορά κωδικού.'
+                    : error.message;
+                return;
             }
+
+            requirePasswordSetup = false;
+            passwordSetupMode = 'invite';
+            clearAuthCallbackFromUrl();
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session) {
+                currentUser = session.user;
+                await fetchProfile();
+                renderApp();
+            } else {
+                renderLogin('Ο κωδικός αποθηκεύτηκε. Συνδεθείτε με το email και τον νέο κωδικό.');
+            }
+        }
+
+        async function handleForgotPassword() {
+            const email = (document.getElementById('email')?.value || '').trim();
+            const errorEl = document.getElementById('error-msg');
+            const infoEl = document.getElementById('info-msg');
+            if (errorEl) errorEl.innerText = '';
+            if (infoEl) infoEl.innerText = '';
+            if (!email) {
+                if (errorEl) errorEl.innerText = 'Γράψτε πρώτα το email σας και πατήστε ξανά «Ξεχάσατε τον κωδικό;».';
+                return;
+            }
+            const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+                redirectTo: appRedirectUrl()
+            });
+            if (error) {
+                if (errorEl) errorEl.innerText = error.message;
+                return;
+            }
+            if (infoEl) infoEl.innerText = 'Σας στείλαμε email με σύνδεσμο για νέο κωδικό. Ελέγξτε τα εισερχόμενα (και τα ανεπιθύμητα).';
+        }
+
+        function startChangePassword() {
+            requirePasswordSetup = true;
+            passwordSetupMode = 'change';
+            renderSetPasswordScreen();
         }
 
         async function handleLogin() {
@@ -2704,6 +2832,11 @@
                     </div>
                 </div>
                 ${pushSection}
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4">
+                    <h3 class="text-sm font-bold text-indigo-300 mb-1">Κωδικός πρόσβασης</h3>
+                    <p class="text-[11px] text-slate-400 mb-3">Αλλάξτε τον κωδικό του λογαριασμού σας.</p>
+                    <button onclick="startChangePassword()" class="w-full bg-slate-900 hover:bg-slate-700 border border-slate-600 text-white py-2.5 rounded-lg text-xs font-semibold transition">Αλλαγή κωδικού</button>
+                </div>
                 <button onclick="handleLogout()" class="w-full bg-red-600/80 hover:bg-red-600 text-white font-semibold p-3 rounded-lg transition text-sm">Αποσύνδεση</button>
             `;
         }
