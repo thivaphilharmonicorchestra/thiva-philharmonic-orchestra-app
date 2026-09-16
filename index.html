@@ -306,6 +306,17 @@
             }[char]));
         }
 
+        function showAppNotice(message) {
+            const existing = document.getElementById('app-notice');
+            if (existing) existing.remove();
+            const el = document.createElement('div');
+            el.id = 'app-notice';
+            el.className = 'fixed top-4 left-1/2 -translate-x-1/2 z-[10001] bg-slate-800 border border-emerald-500/50 text-emerald-200 text-sm font-medium px-4 py-2.5 rounded-xl shadow-lg max-w-[90%] text-center';
+            el.textContent = message;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 3500);
+        }
+
         function safeExternalUrl(value) {
             try {
                 const url = new URL(String(value));
@@ -676,8 +687,9 @@
             }
             return rows.map(row => {
                 const name = relationName(row.instruments) || 'Όργανο';
-                if (row.part_position) return `${name} ${row.part_position}`;
-                return name;
+                let label = row.part_position ? `${name} ${row.part_position}` : name;
+                if (row.concert_set) label += ` · ${row.concert_set}`;
+                return label;
             });
         }
 
@@ -785,6 +797,7 @@
             requirePasswordSetup = false;
             passwordSetupMode = 'invite';
             clearAuthCallbackFromUrl();
+            showAppNotice('Ο κωδικός αποθηκεύτηκε.');
             const { data: { session } } = await supabaseClient.auth.getSession();
             if (session) {
                 currentUser = session.user;
@@ -2763,7 +2776,7 @@
             URL.revokeObjectURL(url);
         }
 
-        function renderProfileTab() {
+        async function renderProfileTab() {
             const content = document.getElementById('content');
             const roleDisplay = isAdminRole() ? 'Διαχειριστής' : (isConductorRole() ? 'Μαέστρος' : 'Μουσικός');
             
@@ -2805,6 +2818,8 @@
                 }
             }
 
+            const adminAssignmentsHtml = isAdminRole() ? await buildAdminAssignmentPanel() : '';
+
             content.innerHTML = `
                 <div class="flex items-center justify-between mb-4">
                     <h2 class="text-2xl font-bold">Το Προφίλ μου</h2>
@@ -2837,8 +2852,123 @@
                     <p class="text-[11px] text-slate-400 mb-3">Αλλάξτε τον κωδικό του λογαριασμού σας.</p>
                     <button onclick="startChangePassword()" class="w-full bg-slate-900 hover:bg-slate-700 border border-slate-600 text-white py-2.5 rounded-lg text-xs font-semibold transition">Αλλαγή κωδικού</button>
                 </div>
+                ${adminAssignmentsHtml}
                 <button onclick="handleLogout()" class="w-full bg-red-600/80 hover:bg-red-600 text-white font-semibold p-3 rounded-lg transition text-sm">Αποσύνδεση</button>
             `;
+            if (isAdminRole()) bindAdminAssignmentPanel();
+        }
+
+        async function buildAdminAssignmentPanel() {
+            const [{ data: people, error: peopleError }, { data: instruments, error: insError }, { data: rows, error: rowsError }] = await Promise.all([
+                supabaseClient.from('profiles').select('id, email, first_name, last_name, role').order('last_name'),
+                supabaseClient.from('instruments').select('id, name, max_regular_parts, sort_order, is_section').order('sort_order'),
+                supabaseClient.from('user_instruments').select('id, user_id, instrument_id, part_position, concert_set, instruments(name)')
+            ]);
+            if (peopleError || insError || rowsError) {
+                return `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4 text-red-400 text-xs">Σφάλμα φόρτωσης αναθέσεων: ${escapeHtml((peopleError || insError || rowsError).message)}</div>`;
+            }
+            window.adminAssignmentPeople = people || [];
+            window.adminAssignmentInstruments = instruments || [];
+            const byUser = {};
+            (rows || []).forEach(row => {
+                if (!byUser[row.user_id]) byUser[row.user_id] = [];
+                byUser[row.user_id].push(row);
+            });
+            const personOptions = (people || []).map(p => {
+                const name = `${p.last_name || ''} ${p.first_name || ''}`.trim() || p.email;
+                return `<option value="${p.id}">${escapeHtml(name)} (${escapeHtml(p.email || '')})</option>`;
+            }).join('');
+            const instrumentOptions = (instruments || []).map(ins =>
+                `<option value="${ins.id}" data-max="${ins.max_regular_parts}">${escapeHtml(ins.name)}${ins.is_section ? ' — ενότητα' : ''}</option>`
+            ).join('');
+            const listHtml = (people || []).map(p => {
+                const assigns = byUser[p.id] || [];
+                if (!assigns.length) return '';
+                const name = `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.email;
+                const items = assigns.map(row => {
+                    const insName = relationName(row.instruments) || 'Όργανο';
+                    const part = row.part_position ? ` ${row.part_position}` : '';
+                    const set = row.concert_set ? ` · ${row.concert_set}` : '';
+                    return `<div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-700/70 last:border-0">
+                        <span class="text-xs text-slate-200">${escapeHtml(insName + part + set)}</span>
+                        <button type="button" data-del-assign="${row.id}" class="text-[10px] text-red-300 hover:text-red-200">Διαγραφή</button>
+                    </div>`;
+                }).join('');
+                return `<div class="mb-3 last:mb-0"><p class="text-[11px] font-semibold text-indigo-300 mb-1">${escapeHtml(name)}</p>${items}</div>`;
+            }).join('') || '<p class="text-xs text-slate-500">Δεν υπάρχουν αναθέσεις ακόμα.</p>';
+
+            return `
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4">
+                    <h3 class="text-sm font-bold text-indigo-300 mb-1">Διαχειριστής: Αναθέσεις οργάνων</h3>
+                    <p class="text-[11px] text-slate-400 mb-3">Εδώ ορίζετε όργανο και αριθμό μέρους (π.χ. Alto Sax 2). Αφήστε το μέρος κενό για απλό όργανο. Το σετ συμπληρώνεται μόνο για ανάθεση συγκεκριμένης συναυλίας.</p>
+                    <select id="asg-user" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">${personOptions}</select>
+                    <select id="asg-instrument" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">${instrumentOptions}</select>
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                        <select id="asg-part" class="p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white"></select>
+                        <input type="text" id="asg-set" placeholder="Σετ (προαιρετικό)" class="p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">
+                    </div>
+                    <button type="button" id="asg-add" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-lg text-xs font-semibold mb-4">Προσθήκη ανάθεσης</button>
+                    <div id="asg-list">${listHtml}</div>
+                </div>
+            `;
+        }
+
+        function refreshAdminPartSelect() {
+            const instrumentSelect = document.getElementById('asg-instrument');
+            const partSelect = document.getElementById('asg-part');
+            if (!instrumentSelect || !partSelect) return;
+            const selected = (window.adminAssignmentInstruments || []).find(ins => ins.id === instrumentSelect.value);
+            const maxParts = selected ? Number(selected.max_regular_parts) : 1;
+            let options = '<option value="">Χωρίς αριθμό μέρους</option>';
+            for (let n = 1; n <= maxParts; n += 1) options += `<option value="${n}">Μέρος ${n}</option>`;
+            partSelect.innerHTML = options;
+        }
+
+        function bindAdminAssignmentPanel() {
+            refreshAdminPartSelect();
+            const instrumentSelect = document.getElementById('asg-instrument');
+            if (instrumentSelect) instrumentSelect.addEventListener('change', refreshAdminPartSelect);
+            const addBtn = document.getElementById('asg-add');
+            if (addBtn) addBtn.addEventListener('click', addInstrumentAssignment);
+            document.querySelectorAll('[data-del-assign]').forEach(btn => {
+                btn.addEventListener('click', () => deleteInstrumentAssignment(btn.getAttribute('data-del-assign')));
+            });
+        }
+
+        async function addInstrumentAssignment() {
+            if (!isAdminRole()) return;
+            const userId = document.getElementById('asg-user')?.value;
+            const instrumentId = document.getElementById('asg-instrument')?.value;
+            const partRaw = document.getElementById('asg-part')?.value;
+            const concertSet = (document.getElementById('asg-set')?.value || '').trim();
+            if (!userId || !instrumentId) {
+                showAppNotice('Επιλέξτε μουσικό και όργανο.');
+                return;
+            }
+            const payload = {
+                user_id: userId,
+                instrument_id: instrumentId,
+                part_position: partRaw ? Number(partRaw) : null,
+                concert_set: concertSet || null
+            };
+            const { error } = await supabaseClient.from('user_instruments').insert([payload]);
+            if (error) {
+                showAppNotice(error.message);
+                return;
+            }
+            showAppNotice('Η ανάθεση αποθηκεύτηκε.');
+            renderProfileTab();
+        }
+
+        async function deleteInstrumentAssignment(id) {
+            if (!isAdminRole() || !id) return;
+            const { error } = await supabaseClient.from('user_instruments').delete().eq('id', id);
+            if (error) {
+                showAppNotice(error.message);
+                return;
+            }
+            showAppNotice('Η ανάθεση διαγράφηκε.');
+            renderProfileTab();
         }
 
         window.onload = init;
