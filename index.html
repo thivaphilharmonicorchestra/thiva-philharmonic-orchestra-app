@@ -1163,8 +1163,14 @@
                     </div>
                 </div>
                 <div class="bg-slate-800 p-3 rounded-xl border border-slate-700 mb-3 space-y-2">
-                    <input type="text" id="mf-search" value="${escapeHtml(musicFilter.search)}" placeholder="🔍 Αναζήτηση τίτλου, συνθέτη..."
-                        class="w-full p-2 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                    <div class="relative">
+                        <input type="search" id="mf-search" value="${escapeHtml(musicFilter.search)}" placeholder="🔍 Αναζήτηση τίτλου, συνθέτη..."
+                            class="w-full p-2 pr-10 bg-slate-900 border border-slate-700 rounded text-sm text-white [appearance:textfield] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden">
+                        <button type="button" id="mf-search-clear" aria-label="Καθαρισμός αναζήτησης"
+                            class="${musicFilter.search.trim() ? '' : 'hidden '}absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 flex items-center justify-center rounded-md text-slate-300 hover:text-white hover:bg-slate-700 text-xl leading-none">
+                            ×
+                        </button>
+                    </div>
                     <div class="grid grid-cols-2 gap-2">
                         ${canFilterMusicInstruments() ? `
                         <select id="mf-instrument" class="p-2 bg-slate-900 border border-slate-700 rounded text-xs text-white">
@@ -1212,10 +1218,25 @@
 
             content.innerHTML = html;
             const search = document.getElementById('mf-search');
+            const searchClear = document.getElementById('mf-search-clear');
+            const syncSearchClear = () => {
+                if (!searchClear) return;
+                searchClear.classList.toggle('hidden', !(search?.value || '').trim());
+            };
             if (search) {
                 search.addEventListener('input', (event) => {
                     musicFilter.search = event.target.value;
+                    syncSearchClear();
                     paintMusicResults();
+                });
+            }
+            if (searchClear && search) {
+                searchClear.addEventListener('click', () => {
+                    search.value = '';
+                    musicFilter.search = '';
+                    syncSearchClear();
+                    paintMusicResults();
+                    search.focus();
                 });
             }
             const instrumentSelect = document.getElementById('mf-instrument');
