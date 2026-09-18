@@ -691,12 +691,15 @@
 
         function viewerFitWidth() {
             const wrapper = document.getElementById('canvas-wrapper');
-            const layoutWidth = wrapper?.clientWidth
-                || document.getElementById('pdf-viewer-container')?.clientWidth
-                || document.documentElement.clientWidth
-                || window.innerWidth;
-            const visibleWidth = window.visualViewport?.width || layoutWidth;
-            return Math.max(280, Math.round(Math.min(layoutWidth, visibleWidth)) - 16);
+            const viewer = document.getElementById('pdf-viewer-container');
+            const width = Math.max(
+                wrapper?.clientWidth || 0,
+                viewer?.clientWidth || 0,
+                document.documentElement.clientWidth || 0,
+                window.innerWidth || 0,
+                Math.round(window.visualViewport?.width || 0)
+            );
+            return Math.max(280, Math.round(width) - 16);
         }
 
         function pdfViewerOpen() {
@@ -759,7 +762,6 @@
             if (Math.abs(currentW - width) < 2) return;
             const height = currentH * (width / currentW);
             scoreStage?.classList.add('pdf-resizing');
-            ignorePdfRefitEvents(250);
             [pdfCanvas, drawCanvas, highlightCanvas].forEach(canvas => {
                 if (!canvas) return;
                 canvas.style.width = `${width}px`;
@@ -1909,7 +1911,6 @@
             document.documentElement.classList.add('pdf-open');
             updateViewerToggleIcon(false);
             setViewportMeta(true);
-            ignorePdfRefitEvents(800);
 
             bindViewerCanvases();
             scoreStage.style.transformOrigin = 'top center';
@@ -1925,6 +1926,7 @@
                 await renderPage(pageNum);
                 await loadSavedAnnotations();
                 setPdfLoadingCover(false);
+                requestAnimationFrame(() => schedulePdfRefit());
             } catch (error) {
                 alert('Σφάλμα φόρτωσης PDF: ' + error.message);
                 closePdfViewer();
@@ -2057,10 +2059,12 @@
         }
 
         function applyScoreZoom() {
-            if (scoreStage) {
-                clampPan();
-                scoreStage.style.transform = `translate3d(${panX}px, ${panY}px, 0) scale(${scoreZoom})`;
-            }
+            if (!scoreStage) return;
+            clampPan();
+            const atRest = scoreZoom <= 1.001 && Math.abs(panX) < 0.5 && Math.abs(panY) < 0.5;
+            scoreStage.style.transform = atRest
+                ? 'none'
+                : `translate3d(${panX}px, ${panY}px, 0) scale(${scoreZoom})`;
         }
 
         function clampPan() {
