@@ -16,8 +16,7 @@
     <!-- Tailwind CSS for modern mobile-first styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Supabase JavaScript Client -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <!-- PDF.js Library for In-App Rendering & Annotations -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -513,10 +512,31 @@
             if (existing) existing.remove();
             const el = document.createElement('div');
             el.id = 'app-notice';
-            el.className = 'fixed top-4 left-1/2 -translate-x-1/2 z-[10001] bg-slate-800 border border-emerald-500/50 text-emerald-200 text-sm font-medium px-4 py-2.5 rounded-xl shadow-lg max-w-[90%] text-center';
+            el.className = 'fixed top-4 left-1/2 -translate-x-1/2 z-[10001] bg-slate-800 border border-emerald-500/50 text-emerald-200 text-sm font-medium px-4 py-2.5 rounded-xl max-w-[90%] text-center';
             el.textContent = message;
             document.body.appendChild(el);
-            setTimeout(() => el.remove(), 3500);
+            setTimeout(() => el.remove(), 4000);
+        }
+
+        function confirmAppAction(message) {
+            return new Promise((resolve) => {
+                document.getElementById('app-confirm')?.remove();
+                const dialog = document.createElement('div');
+                dialog.id = 'app-confirm';
+                dialog.className = 'fixed inset-0 z-[10002] bg-black/60 flex items-center justify-center p-4';
+                dialog.innerHTML = `
+                    <div class="bg-slate-800 border border-slate-600 rounded-2xl p-4 w-full max-w-sm">
+                        <p class="text-sm text-slate-100 mb-4"></p>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button type="button" id="app-confirm-no" class="py-2.5 rounded-lg bg-slate-700 text-white text-sm font-semibold">Όχι</button>
+                            <button type="button" id="app-confirm-yes" class="py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold">Ναι</button>
+                        </div>
+                    </div>`;
+                dialog.querySelector('p').textContent = message;
+                document.body.appendChild(dialog);
+                dialog.querySelector('#app-confirm-no').onclick = () => { dialog.remove(); resolve(false); };
+                dialog.querySelector('#app-confirm-yes').onclick = () => { dialog.remove(); resolve(true); };
+            });
         }
 
         function safeExternalUrl(value) {
@@ -1263,7 +1283,7 @@
                     <h1 class="text-2xl font-bold text-indigo-400 mb-2">${title}</h1>
                     <p class="text-slate-400 mb-6 text-sm">${subtitle}</p>
                     <div class="w-full bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-                        <input type="password" id="new-password" placeholder="Νέος κωδικός (τουλάχιστον 6 χαρακτήρες)" class="w-full mb-3 p-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-indigo-500 text-sm">
+                        <input type="password" id="new-password" placeholder="Νέος κωδικός (τουλάχιστον 8 χαρακτήρες)" class="w-full mb-3 p-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-indigo-500 text-sm">
                         <input type="password" id="new-password-confirm" placeholder="Επιβεβαίωση κωδικού" class="w-full mb-4 p-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-indigo-500 text-sm">
                         <button onclick="handleSetPassword()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold p-3 rounded-lg transition text-sm">${isChange ? 'Αποθήκευση κωδικού' : 'Αποθήκευση & Είσοδος'}</button>
                         ${isChange ? `<button onclick="requirePasswordSetup = false; passwordSetupMode = 'invite'; renderApp();" class="w-full mt-2 text-slate-400 text-xs py-2">Άκυρο</button>` : ''}
@@ -1277,8 +1297,8 @@
             const password = document.getElementById('new-password').value;
             const confirm = document.getElementById('new-password-confirm').value;
             const errEl = document.getElementById('password-error-msg');
-            if (!password || password.length < 6) {
-                errEl.innerText = 'Ο κωδικός πρέπει να έχει τουλάχιστον 6 χαρακτήρες.';
+            if (!password || password.length < 8) {
+                errEl.innerText = 'Ο κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες.';
                 return;
             }
             if (password !== confirm) {
@@ -1491,15 +1511,15 @@
 
         async function deleteAnnouncement(id) {
             if (!isPrivilegedRole()) {
-                alert('Μόνο οι διαχειριστές και ο μαέστρος μπορούν να διαγράφουν ανακοινώσεις.');
+                showAppNotice('Μόνο οι διαχειριστές και ο μαέστρος μπορούν να διαγράφουν ανακοινώσεις.');
                 return;
             }
             const announcementId = Number(id);
             if (!Number.isSafeInteger(announcementId) || announcementId <= 0) {
-                alert('Μη έγκυρη ανακοίνωση.');
+                showAppNotice('Μη έγκυρη ανακοίνωση.');
                 return;
             }
-            if (!confirm('Να διαγραφεί οριστικά αυτή η ανακοίνωση;')) return;
+            if (!await confirmAppAction('Να διαγραφεί οριστικά αυτή η ανακοίνωση;')) return;
 
             const { error } = await supabaseClient
                 .from('announcement_log')
@@ -1507,7 +1527,7 @@
                 .eq('id', announcementId);
 
             if (error) {
-                alert('Σφάλμα διαγραφής ανακοίνωσης: ' + error.message);
+                showAppNotice('Σφάλμα διαγραφής ανακοίνωσης: ' + error.message);
                 return;
             }
             await renderNotificationsTab();
@@ -1532,7 +1552,7 @@
 
             if (musicQuery.error) {
                 musicTabShellReady = false;
-                content.innerHTML = `<p class="text-red-400 text-sm">Σφάλμα φόρτωσης: ${musicQuery.error.message}</p>`;
+                content.innerHTML = `<p class="text-red-400 text-sm">Σφάλμα φόρτωσης: ${escapeHtml(musicQuery.error.message)}</p>`;
                 return;
             }
             const music = musicQuery.data;
@@ -1764,7 +1784,7 @@
 
         async function addMusic() {
             if (!isAdminRole()) {
-                alert('Μόνο οι διαχειριστές μπορούν να μεταφορτώνουν παρτιτούρες.');
+                showAppNotice('Μόνο οι διαχειριστές μπορούν να μεταφορτώνουν παρτιτούρες.');
                 return;
             }
             const piece_title = document.getElementById('m-title').value.trim();
@@ -1775,7 +1795,7 @@
             const fileInput = document.getElementById('m-file');
 
             if (!piece_title || !concert_set || !instrumentId || !fileInput.files || fileInput.files.length === 0) {
-                alert('Παρακαλώ συμπληρώστε τίτλο, σετ, όργανο και αρχείο PDF.');
+                showAppNotice('Παρακαλώ συμπληρώστε τίτλο, σετ, όργανο και αρχείο PDF.');
                 return;
             }
 
@@ -1802,10 +1822,10 @@
                 if (dbError) throw dbError;
 
                 musicTabShellReady = false;
-                alert('Η παρτιτούρα μεταφορτώθηκε επιτυχώς!');
+                showAppNotice('Η παρτιτούρα μεταφορτώθηκε επιτυχώς!');
                 renderMusicTab();
             } catch (error) {
-                alert('Σφάλμα αποθήκευσης: ' + error.message);
+                showAppNotice('Σφάλμα αποθήκευσης: ' + error.message);
             }
         }
 
@@ -1816,7 +1836,7 @@
                 .createSignedUrl(filePath, 60);
 
             if (error || !data?.signedUrl) {
-                alert('Σφάλμα πρόσβασης στο αρχείο: ' + (error?.message || 'Άγνωστο σφάλμα'));
+                showAppNotice('Σφάλμα πρόσβασης στο αρχείο: ' + (error?.message || 'Άγνωστο σφάλμα'));
                 return;
             }
 
@@ -1928,7 +1948,7 @@
                 setPdfLoadingCover(false);
                 requestAnimationFrame(() => schedulePdfRefit());
             } catch (error) {
-                alert('Σφάλμα φόρτωσης PDF: ' + error.message);
+                showAppNotice('Σφάλμα φόρτωσης PDF: ' + error.message);
                 closePdfViewer();
             }
         }
@@ -2670,7 +2690,7 @@
             const { data: events, error: eventError } = await supabaseClient.from('band_events').select('*').order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true });
             
             if (eventError) {
-                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Πρόγραμμα</h2><p class="text-red-400 text-sm">Σφάλμα φόρτωσης εκδηλώσεων: ${eventError.message}</p>`;
+                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Πρόγραμμα</h2><p class="text-red-400 text-sm">Σφάλμα φόρτωσης εκδηλώσεων: ${escapeHtml(eventError.message)}</p>`;
                 return;
             }
             sortEventsChronologically(events);
@@ -2820,7 +2840,7 @@
             
             if (isAdmin) {
                 html += `<p class="text-xs text-slate-400 mb-2">Συγκεντρωτική κατάσταση παρουσιών</p>
-                <button onclick="exportAttendanceWorkbook()" class="mb-3 w-full bg-emerald-700 hover:bg-emerald-600 text-white py-2 rounded-lg text-xs font-semibold">Εξαγωγή παρουσιών (XLSX)</button>`;
+                <button onclick="exportAttendanceWorkbook()" class="mb-3 w-full bg-emerald-700 hover:bg-emerald-600 text-white py-2 rounded-lg text-xs font-semibold">Εξαγωγή παρουσιών (CSV)</button>`;
 
                 const vapidOK = !!urlB64ToUint8Array(VAPID_PUBLIC_KEY);
                 const edgeFnOK = !!(PUSH_EDGE_FUNCTION_URL && PUSH_EDGE_FUNCTION_URL.length > 20);
@@ -2828,31 +2848,23 @@
 
                 html += `
                     <details class="mb-4 bg-slate-800 p-3 rounded-xl border border-slate-700">
-                        <summary class="cursor-pointer font-bold text-sm text-amber-300 select-none">📢 Αποστολή Push Ειδοποίησης (Admin)</summary>
+                        <summary class="cursor-pointer font-bold text-sm text-amber-300 select-none">Αποστολή ειδοποίησης (διαχειριστής)</summary>
                         <div class="mt-3 space-y-2">
                             <div class="${statusColor} border rounded p-2 text-[11px] space-y-0.5">
                                 <div><b>Κατάσταση συστήματος:</b></div>
-                                <div>• VAPID Δημόσιο Κλειδί: ${vapidOK ? '✅ Ορισμένο' : '⚠️ Δεν έχει οριστεί ακόμα'}</div>
-                                <div>• Edge Function (Sender): ${edgeFnOK ? '✅ Ρυθμισμένο' : '⚠️ Δεν έχει οριστεί URL (απαιτείται για αποστολή από κινητό)'}</div>
+                                <div>• VAPID δημόσιο κλειδί: ${vapidOK ? 'Ορισμένο' : 'Δεν έχει οριστεί ακόμα'}</div>
+                                <div>• Edge Function: ${edgeFnOK ? 'Ρυθμισμένο' : 'Δεν έχει οριστεί URL'}</div>
                             </div>
-                            <div id="push-sub-count" class="text-[11px] text-slate-400 bg-slate-900/60 border border-slate-700/60 rounded p-2">🔢 Φόρτωση αριθμού συνδρομητών...</div>
-                            <p class="text-[11px] text-slate-400 pt-1">Στείλτε άμεση ειδοποίηση σε όλους τους μουσικούς που έχουν ενεργοποιήσει τα push notifications.</p>
+                            <div id="push-sub-count" class="text-[11px] text-slate-400 bg-slate-900/60 border border-slate-700/60 rounded p-2">Φόρτωση αριθμού συνδρομητών...</div>
+                            <p class="text-[11px] text-slate-400 pt-1">Στείλτε άμεση ειδοποίηση σε όλους τους μουσικούς που έχουν ενεργοποιήσει τις ειδοποιήσεις.</p>
                             <input id="push-title" type="text" placeholder="Τίτλος (π.χ., Νέα Πρόβα)"
                                 class="w-full p-2 bg-slate-900 border border-slate-700 rounded text-sm text-white">
                             <textarea id="push-body" rows="2" placeholder="Μήνυμα (π.χ., Πρόβα Δευτέρα 19:00 στο Ωδείο)"
                                 class="w-full p-2 bg-slate-900 border border-slate-700 rounded text-sm text-white"></textarea>
 
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                                <button onclick="sendAdminAnnouncementDirect()"
-                                    class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded text-xs font-bold disabled:opacity-40"
-                                    >🚀 Απευθείας Αποστολή
-                                    <span class="block text-[9px] font-normal opacity-80">(από το app / iPhone)</span>
-                                </button>
-                                <button onclick="sendAdminAnnouncementDownloadJSON()"
-                                    class="w-full bg-amber-600 hover:bg-amber-500 text-white py-2 rounded text-xs font-bold">💾 Προεπισκόπηση & JSON
-                                    <span class="block text-[9px] font-normal opacity-80">(για send_push_notification.js)</span>
-                                </button>
-                            </div>
+                            <button onclick="sendAdminAnnouncementDirect()"
+                                class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded text-xs font-bold disabled:opacity-40"
+                                >Αποστολή ειδοποίησης</button>
 
                             <div id="push-preview" class="hidden bg-slate-900 p-2 rounded border border-slate-700 text-xs space-y-1"></div>
                             <div id="push-result" class="hidden text-xs rounded p-2 space-y-1"></div>
@@ -3010,14 +3022,11 @@
                     .from('push_subscriptions')
                     .select('*', { count: 'exact', head: true });
                 if (error) throw error;
-                const c = count || 0;
-                const emailsResp = await supabaseClient.from('push_subscriptions').select('user_email');
-                const u = new Set((emailsResp.data || []).map(x => x.user_email).filter(Boolean)).size;
                 el.className = 'text-[11px] bg-indigo-900/40 border border-indigo-700/50 rounded p-2 text-indigo-200';
-                el.innerHTML = `🔢 <b>${c}</b> ενεργές συνδρομές push (<b>${u}</b> μοναδικοί χρήστες)<br><span class="opacity-80 text-[10px]">Κάθε συσκευή / browser είναι ξεχωριστή συνδρομή.</span>`;
+                el.textContent = `${count || 0} ενεργές συνδρομές ειδοποιήσεων. Κάθε συσκευή μετράει χωριστά.`;
             } catch (e) {
                 el.className = 'text-[11px] bg-red-900/30 border border-red-700/50 rounded p-2 text-red-300';
-                el.innerText = '⚠ Αδυναμία φόρτωσης αριθμού συνδρομητών: ' + e.message;
+                el.textContent = 'Αδυναμία φόρτωσης αριθμού συνδρομητών.';
             }
         }
 
@@ -3161,7 +3170,7 @@
                 excuse = prompt('Παρακαλώ εισάγετε την αιτιολογία για την απουσία σας:');
                 if (excuse === null) return; 
                 if (excuse.trim() === '') {
-                    alert('Η αιτιολογία είναι υποχρεωτική όταν δηλώνετε ότι δεν μπορείτε να παρευρεθείτε.');
+                    showAppNotice('Η αιτιολογία είναι υποχρεωτική όταν δηλώνετε ότι δεν μπορείτε να παρευρεθείτε.');
                     return;
                 }
             } else {
@@ -3170,7 +3179,7 @@
 
             const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
             if (!userEmail) {
-                alert('Σφάλμα: Δεν βρέθηκε ενεργό email χρήστη.');
+                showAppNotice('Σφάλμα: Δεν βρέθηκε ενεργό email χρήστη.');
                 return;
             }
 
@@ -3183,7 +3192,7 @@
                 );
 
             if (error) {
-                alert(`Σφάλμα αποθήκευσης παρουσίας:\n${error.message}\n\nΚωδικός: ${error.code || '—'}`);
+                showAppNotice(`Σφάλμα αποθήκευσης παρουσίας:\n${error.message}\n\nΚωδικός: ${error.code || '—'}`);
             } else {
                 const scroller = document.getElementById('content') || document.scrollingElement || document.documentElement;
                 const scrollY = scroller.scrollTop || 0;
@@ -3202,7 +3211,7 @@
 
         async function addEvent() {
             if (!isAdminRole()) {
-                alert('Μόνο οι διαχειριστές μπορούν να δημιουργούν εκδηλώσεις.');
+                showAppNotice('Μόνο οι διαχειριστές μπορούν να δημιουργούν εκδηλώσεις.');
                 return;
             }
             const event_name = document.getElementById('e-name').value;
@@ -3214,9 +3223,9 @@
             const notes = document.getElementById('e-notes').value;
 
             const { error } = await supabaseClient.from('band_events').insert([{ event_name, event_type, date, time, location, dress_code, notes }]);
-            if (error) alert(error.message);
+            if (error) showAppNotice(error.message);
             else {
-                alert('Η εκδήλωση προστέθηκε!');
+                showAppNotice('Η εκδήλωση προστέθηκε!');
                 renderEventsTab();
             }
         }
@@ -3247,13 +3256,13 @@
 
         async function enablePushNotifications() {
             if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-                alert('Οι ειδοποιήσεις δεν υποστηρίζονται από αυτό το πρόγραμμα περιήγησης.');
+                showAppNotice('Οι ειδοποιήσεις δεν υποστηρίζονται από αυτό το πρόγραμμα περιήγησης.');
                 return;
             }
 
             const appKey = urlB64ToUint8Array(VAPID_PUBLIC_KEY);
             if (!appKey) {
-                alert('Το δημόσιο κλειδί VAPID δεν έχει ρυθμιστεί ακόμα.\n\nΕκτελέστε πρώτα το push_notifications/generate_vapid_keys.js και επικολλήστε το δημόσιο κλειδί στη μεταβλητή VAPID_PUBLIC_KEY στο index.html (γραμμή ~104).');
+                showAppNotice('Το δημόσιο κλειδί VAPID δεν έχει ρυθμιστεί ακόμα.');
                 return;
             }
 
@@ -3265,7 +3274,7 @@
                 if (permission !== 'granted') {
                     localStorage.setItem(PUSH_OPT_KEY, '0');
                     setPushSwitchState(false);
-                    alert('Η άδεια ειδοποιήσεων δεν εγκρίθηκε.');
+                    showAppNotice('Η άδεια ειδοποιήσεων δεν εγκρίθηκε.');
                     return;
                 }
 
@@ -3298,7 +3307,7 @@
                 pushSubscription = null;
                 localStorage.setItem(PUSH_OPT_KEY, '0');
                 setPushSwitchState(false);
-                alert('Σφάλμα ενεργοποίησης ειδοποιήσεων: ' + e.message);
+                showAppNotice('Σφάλμα ενεργοποίησης ειδοποιήσεων: ' + e.message);
             }
         }
 
@@ -3321,13 +3330,13 @@
             } catch (e) {
                 pushSubscription = existing;
                 setPushSwitchState(true);
-                alert('Σφάλμα απενεργοποίησης: ' + e.message);
+                showAppNotice('Σφάλμα απενεργοποίησης: ' + e.message);
             }
         }
 
         async function sendAdminAnnouncementDirect() {
             if (!isPrivilegedRole()) {
-                alert('Μόνο οι διαχειριστές και ο μαέστρος μπορούν να στείλουν ειδοποιήσεις.');
+                showAppNotice('Μόνο οι διαχειριστές και ο μαέστρος μπορούν να στείλουν ειδοποιήσεις.');
                 return;
             }
             const titleEl = document.getElementById('push-title');
@@ -3335,15 +3344,15 @@
             const title = (titleEl.value || '').trim();
             const body  = (bodyEl.value  || '').trim();
 
-            if (!title || !body) { alert('Παρακαλώ συμπληρώστε τίτλο και μήνυμα.'); return; }
+            if (!title || !body) { showAppNotice('Παρακαλώ συμπληρώστε τίτλο και μήνυμα.'); return; }
 
             const edgeUrl = PUSH_EDGE_FUNCTION_URL || '';
             if (!urlB64ToUint8Array(VAPID_PUBLIC_KEY)) {
-                alert('Το VAPID public key δεν είναι έγκυρο. Πρέπει να είναι το νέο, μεγαλύτερο κλειδί από generate_vapid_keys.js.');
+                showAppNotice('Το VAPID public key δεν είναι έγκυρο. Πρέπει να είναι το νέο, μεγαλύτερο κλειδί από generate_vapid_keys.js.');
                 return;
             }
             if (edgeUrl.length < 10) {
-                alert('Δεν έχει οριστεί το URL του Edge Function!\n\nΕνεργοποιήστε το push-sender στο Supabase Dashboard -> Edge Functions και επικολλήστε το URL στη μεταβλητή PUSH_EDGE_FUNCTION_URL στο index.html.');
+                showAppNotice('Δεν έχει οριστεί το URL του Edge Function!\n\nΕνεργοποιήστε το push-sender στο Supabase Dashboard -> Edge Functions και επικολλήστε το URL στη μεταβλητή PUSH_EDGE_FUNCTION_URL στο index.html.');
                 return;
             }
 
@@ -3379,67 +3388,15 @@
 
                 result.className = 'text-xs rounded p-2 space-y-1 bg-emerald-900/40 border border-emerald-700/50';
                 result.innerHTML =
-                    `<div class="font-bold text-emerald-200">✅ Αποστολή ολοκληρώθηκε</div>` +
-                    `<div class="text-emerald-100">Επιτυχείς: <b>${ok}</b> • Αποτυχίες: <b>${fail}</b> • Σύνολο: <b>${total}</b></div>` +
-                    (note ? `<div class="text-[11px] text-emerald-200/80 mt-1 italic">${note}</div>` : '') +
+                    `<div class="font-bold text-emerald-200">Αποστολή ολοκληρώθηκε</div>` +
+                    `<div class="text-emerald-100">Επιτυχείς: <b>${Number(ok)}</b> • Αποτυχίες: <b>${Number(fail)}</b> • Σύνολο: <b>${Number(total)}</b></div>` +
+                    (note ? `<div class="text-[11px] text-emerald-200/80 mt-1 italic">${escapeHtml(note)}</div>` : '') +
                     ((data && data.failed_details && data.failed_details.length) ?
-                        `<div class="mt-1 text-[10px] text-emerald-100/80 max-h-16 overflow-auto">Αποτυχίες: ${data.failed_details.map(x => x.email + ' (' + x.reason + ')').join(', ')}</div>` : '');
+                        `<div class="mt-1 text-[10px] text-emerald-100/80 max-h-16 overflow-auto">Αποτυχίες: ${escapeHtml(data.failed_details.map(x => `${x.email} (${x.reason})`).join(', '))}</div>` : '');
             } catch (e) {
                 result.className = 'text-xs rounded p-2 space-y-1 bg-red-900/40 border border-red-700/50';
-                result.innerHTML = `<div class="font-bold text-red-200">❌ Σφάλμα αποστολής</div><div class="text-red-100">${e.message}</div><div class="text-[10px] text-red-200/70 mt-1">Αν το σφάλμα έχει να κάνει με "secrets" ή "VAPID", ελέγξτε αν έχουν οριστεί σωστά τα Secrets στο Edge Function (Supabase Dashboard).</div>`;
+                result.innerHTML = `<div class="font-bold text-red-200">Σφάλμα αποστολής</div><div class="text-red-100">${escapeHtml(e.message)}</div><div class="text-[10px] text-red-200/70 mt-1">Αν το σφάλμα έχει να κάνει με secrets ή VAPID, ελέγξτε τα Secrets στο Edge Function.</div>`;
             }
-        }
-
-        function sendAdminAnnouncementDownloadJSON() {
-            const titleEl = document.getElementById('push-title');
-            const bodyEl  = document.getElementById('push-body');
-            const title = (titleEl.value || '').trim();
-            const body  = (bodyEl.value  || '').trim();
-
-            if (!title || !body) { alert('Παρακαλώ συμπληρώστε τίτλο και μήνυμα.'); return; }
-
-            const preview = document.getElementById('push-preview');
-            preview.classList.remove('hidden');
-            preview.className = 'bg-slate-900 p-2 rounded border border-slate-700 text-xs space-y-1';
-            preview.innerHTML = `
-                <p class="text-slate-500">Προεπισκόπηση ειδοποίησης:</p>
-                <p class="text-white font-bold text-sm">${escapeHtml(title)}</p>
-                <p class="text-slate-300 text-[12px]">${escapeHtml(body)}</p>
-                <p class="text-[10px] text-amber-400/80 mt-1">⚠️ Αυτό το κουμπί απλά δημιουργεί το αρχείο <b>announcement.json</b>. Για πραγματική αποστολή, χρησιμοποιήστε είτε το <b>send_push_notification.js</b> στον υπολογιστή σας, είτε ενεργοποιήστε το Edge Function για απευθείας αποστολή από το κινητό.</p>
-            `;
-
-            const sentBy = currentProfile?.email || currentUser?.email;
-
-            supabaseClient
-                .from('push_subscriptions')
-                .select('endpoint, p256dh_key, auth_secret, user_email')
-                .then(({ data: subs, error }) => {
-                    const count = subs?.length || 0;
-                    const payload = {
-                        announcement: {
-                            title, body,
-                            url: './index.html#notifications',
-                            sent_by_email: sentBy,
-                            target_count: count,
-                            created_at: new Date().toISOString()
-                        },
-                        subscriptions: subs || []
-                    };
-                    downloadJSON(payload, 'announcement.json');
-                    alert(`✅ Δημιουργήθηκε το αρχείο announcement.json!\n\nΣτόχοι: ${count} συνδρομητές\n\nΕπόμενο βήμα:\nΜετακινήστε το announcement.json στον φάκελο push_notifications/ και τρέξτε:\n  node send_push_notification.js\n\n(Ή αν έχετε ενεργοποιήσει το Edge Function, χρησιμοποιήστε το κουμπί 🚀 Απευθείας Αποστολή.)`);
-                });
-        }
-
-        function downloadJSON(obj, filename) {
-            const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
         }
 
         function showAppToast(message, variant = 'success') {
