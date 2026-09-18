@@ -1,7 +1,5 @@
-const CACHE_VERSION = 'thiva-philharmonic-v44';
+const CACHE_VERSION = 'thiva-philharmonic-v46';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
-const PDF_CACHE = `${CACHE_VERSION}-pdfs`;
-const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
 const STATIC_ASSETS = [
     './',
@@ -11,7 +9,7 @@ const STATIC_ASSETS = [
     './thiva_home_button.png',
     './manifest.webmanifest',
     'https://cdn.tailwindcss.com',
-    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
+    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4',
     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
     'https://raw.githubusercontent.com/thivaphilharmonic-maker/thiva-philharmonic-orchestra-app/main/logo.png'
@@ -42,8 +40,27 @@ self.addEventListener('activate', (event) => {
 
 function isPdfRequest(url) {
     return url.endsWith('.pdf') ||
-        url.includes('supabase') && (url.includes('sheet-music') || url.includes('storage')) ||
-        url.includes('token=') && (url.includes('pdf') || url.includes('render'));
+        (url.includes('supabase') && (url.includes('sheet-music') || url.includes('storage'))) ||
+        (url.includes('token=') && (url.includes('pdf') || url.includes('render')));
+}
+
+function isSupabaseApi(url) {
+    try {
+        return new URL(url).hostname.endsWith('supabase.co');
+    } catch {
+        return false;
+    }
+}
+
+function safeNotificationUrl(raw) {
+    const fallback = new URL('./index.html', self.registration.scope).href;
+    try {
+        const resolved = new URL(String(raw || ''), self.registration.scope);
+        if (resolved.origin !== self.location.origin) return fallback;
+        return resolved.href;
+    } catch {
+        return fallback;
+    }
 }
 
 self.addEventListener('fetch', (event) => {
@@ -52,47 +69,24 @@ self.addEventListener('fetch', (event) => {
 
     if (req.method !== 'GET') return;
 
-    if (isPdfRequest(url.href) || (req.headers.get('accept') || '').includes('application/pdf')) {
+    if (isPdfRequest(url.href) || (req.headers.get('accept') || '').includes('application/pdf') || isSupabaseApi(url.href)) {
         event.respondWith(
-            caches.open(PDF_CACHE).then(async (cache) => {
-                const cached = await cache.match(req);
-                if (cached) return cached;
-                try {
-                    const resp = await fetch(req);
-                    if (resp.ok) cache.put(req, resp.clone());
-                    return resp;
-                } catch (e) {
-                    return cached || caches.match('./index.html');
-                }
-            })
+            fetch(req).catch(() => new Response('Unavailable', { status: 503, statusText: 'Unavailable' }))
         );
         return;
     }
 
-    if (url.origin === location.origin || STATIC_ASSETS.includes(url.pathname) || STATIC_ASSETS.includes(url.href)) {
+    if (url.origin === location.origin || STATIC_ASSETS.includes(url.href) || STATIC_ASSETS.includes(url.pathname)) {
         event.respondWith(
             fetch(req).then((resp) => {
                 if (resp.ok) {
-                    caches.open(RUNTIME_CACHE).then(c => c.put(req, resp.clone())).catch(() => {});
+                    caches.open(STATIC_CACHE).then(c => c.put(req, resp.clone())).catch(() => {});
                 }
                 return resp;
             }).catch(() => caches.match(req).then(cached => cached || caches.match('./index.html')))
         );
         return;
     }
-
-    event.respondWith(
-        caches.open(RUNTIME_CACHE).then(async (cache) => {
-            const cached = await cache.match(req);
-            try {
-                const resp = await fetch(req);
-                if (resp.ok) cache.put(req, resp.clone());
-                return resp;
-            } catch (e) {
-                return cached || new Response('Offline', { status: 503 });
-            }
-        })
-    );
 });
 
 self.addEventListener('push', (event) => {
@@ -112,7 +106,7 @@ self.addEventListener('push', (event) => {
         badge: data.badge || `${self.registration.scope}thiva_app_icon.png`,
         vibrate: [200, 100, 200],
         tag: data.tag || 'thiva-philharmonic-notification',
-        data: data.data || {},
+        data: { url: safeNotificationUrl(data.data && data.data.url) },
         silent: false
     };
 
@@ -122,15 +116,15 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
-    const url = event.notification.data && event.notification.data.url ? event.notification.data.url : './index.html#notifications';
+    const url = safeNotificationUrl(event.notification.data && event.notification.data.url);
     event.waitUntil(
         self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
             for (const c of clients) {
-            if ('focus' in c) {
-                return c.focus().then(() => c.navigate(url));
+                if ('focus' in c) {
+                    return c.focus().then(() => c.navigate(url));
+                }
             }
-        }
-        if (self.clients.openWindow) return self.clients.openWindow(url);
-    })
+            if (self.clients.openWindow) return self.clients.openWindow(url);
+        })
     );
 });
