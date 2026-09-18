@@ -102,6 +102,10 @@
             padding-top: env(safe-area-inset-top, 0px);
             box-sizing: border-box;
         }
+        html.pdf-open,
+        html.pdf-open body {
+            overflow: hidden !important;
+        }
         #pdf-viewer-container > .viewer-float:not(#viewer-show-controls) {
             top: calc(env(safe-area-inset-top, 0px) + 12px);
         }
@@ -571,6 +575,9 @@
         let pageIndicatorTimer = null;
         let viewerResizeTimer = null;
         let pdfRefitQueued = false;
+        let pdfRefitRunning = false;
+        let pdfRefitToken = 0;
+        let pdfRefitIgnoreUntil = 0;
         let lastPdfFitWidth = 0;
         let pushBusy = false;
         let annotationHistory = [];
@@ -671,19 +678,8 @@
             setViewportMeta(!!pdfOpen);
         }
 
-        function isAndroidDevice() {
-            return /Android/i.test(navigator.userAgent);
-        }
-
         async function enterPdfFullscreen() {
-            if (isAndroidDevice()) return;
-            const el = document.getElementById('pdf-viewer-container');
-            if (!el) return;
-            try {
-                if (document.fullscreenElement || document.webkitFullscreenElement) return;
-                if (el.requestFullscreen) await el.requestFullscreen();
-                else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-            } catch {}
+            return;
         }
 
         async function exitPdfFullscreen() {
@@ -703,15 +699,67 @@
             return Math.max(280, Math.round(Math.min(layoutWidth, visibleWidth)) - 16);
         }
 
+        function pdfViewerOpen() {
+            return !!(pdfDoc && !document.getElementById('pdf-viewer-container')?.classList.contains('hidden'));
+        }
+
+        function ignorePdfRefitEvents(ms = 500) {
+            pdfRefitIgnoreUntil = Date.now() + ms;
+        }
+
+        function pdfOutputScale(cssWidth, cssHeight) {
+            const dpr = Math.min(2, window.devicePixelRatio || 1);
+            const maxPixels = 3500000;
+            const raw = Math.max(1, cssWidth * cssHeight * dpr * dpr);
+            if (raw <= maxPixels) return dpr;
+            return Math.max(1, Math.sqrt(maxPixels / Math.max(1, cssWidth * cssHeight)));
+        }
+
+        function resizeCanvasBuffer(canvas, pixelWidth, pixelHeight, cssWidth, cssHeight) {
+            if (!canvas) return;
+            if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+            if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+            canvas.style.width = `${cssWidth}px`;
+            canvas.style.height = `${cssHeight}px`;
+        }
+
+        function snapshotInkBitmaps() {
+            if (!drawCanvas || !highlightCanvas) return null;
+            if ((drawCanvas.width <= 1 && highlightCanvas.width <= 1)) return null;
+            return {
+                drawing: cloneAnnotationCanvas(drawCanvas),
+                highlighting: cloneAnnotationCanvas(highlightCanvas)
+            };
+        }
+
+        function restoreInkBitmaps(ink) {
+            if (!ink || !drawCtx || !highlightCtx) return;
+            if (ink.drawing) drawCtx.drawImage(ink.drawing, 0, 0, drawCanvas.width, drawCanvas.height);
+            if (ink.highlighting) highlightCtx.drawImage(ink.highlighting, 0, 0, highlightCanvas.width, highlightCanvas.height);
+            if (ink.drawing) ink.drawing.width = 0;
+            if (ink.highlighting) ink.highlighting.width = 0;
+        }
+
+        function onViewportChange() {
+            if (!pdfViewerOpen()) {
+                syncTabletShell();
+                return;
+            }
+            applyPdfCssFit();
+            if (Date.now() < pdfRefitIgnoreUntil) return;
+            schedulePdfRefit();
+        }
+
         function applyPdfCssFit() {
             if (!pdfCanvas || !pdfDoc) return;
             const width = viewerFitWidth();
             const currentW = parseFloat(pdfCanvas.style.width) || 0;
             const currentH = parseFloat(pdfCanvas.style.height) || 0;
             if (!currentW || !currentH) return;
-            if (Math.abs(currentW - width) < 1) return;
+            if (Math.abs(currentW - width) < 2) return;
             const height = currentH * (width / currentW);
             scoreStage?.classList.add('pdf-resizing');
+            ignorePdfRefitEvents(250);
             [pdfCanvas, drawCanvas, highlightCanvas].forEach(canvas => {
                 if (!canvas) return;
                 canvas.style.width = `${width}px`;
@@ -720,51 +768,54 @@
         }
 
         function schedulePdfRefit() {
-            if (!pdfDoc || document.getElementById('pdf-viewer-container').classList.contains('hidden')) return;
+            if (!pdfViewerOpen()) return;
             applyPdfCssFit();
             clearTimeout(viewerResizeTimer);
-            viewerResizeTimer = setTimeout(async () => {
-                if (!pdfDoc || document.getElementById('pdf-viewer-container').classList.contains('hidden')) return;
-                const width = viewerFitWidth();
-                if (pageRendering) {
-                    pdfRefitQueued = true;
-                    return;
-                }
-                if (lastPdfFitWidth && Math.abs(width - lastPdfFitWidth) < 2) {
-                    applyPdfCssFit();
-                    scoreStage?.classList.remove('pdf-resizing');
-                    return;
-                }
-                pdfRefitQueued = false;
-                savePageToMemory();
-                await renderPage(pageNum);
-                await restorePageFromMemory();
+            const token = ++pdfRefitToken;
+            viewerResizeTimer = setTimeout(() => runPdfRefit(token), 280);
+        }
+
+        async function runPdfRefit(token) {
+            if (token !== pdfRefitToken || !pdfViewerOpen()) return;
+            if (pdfRefitRunning || pageRendering) {
+                pdfRefitQueued = true;
+                return;
+            }
+            const width = viewerFitWidth();
+            if (lastPdfFitWidth && Math.abs(width - lastPdfFitWidth) < 12) {
+                applyPdfCssFit();
                 scoreStage?.classList.remove('pdf-resizing');
-                if (pdfRefitQueued) schedulePdfRefit();
-            }, 320);
+                return;
+            }
+            pdfRefitRunning = true;
+            pdfRefitQueued = false;
+            ignorePdfRefitEvents(700);
+            const ink = snapshotInkBitmaps();
+            try {
+                await renderPage(pageNum);
+                restoreInkBitmaps(ink);
+            } catch (error) {
+                console.warn('PDF refit failed:', error);
+            } finally {
+                pdfRefitRunning = false;
+                scoreStage?.classList.remove('pdf-resizing');
+                ignorePdfRefitEvents(450);
+                if (pdfRefitQueued) {
+                    pdfRefitQueued = false;
+                    schedulePdfRefit();
+                }
+            }
         }
 
         syncTabletShell();
-        window.addEventListener('orientationchange', () => {
-            syncTabletShell();
-            applyPdfCssFit();
-            schedulePdfRefit();
-        });
-        if (window.visualViewport) {
-            window.visualViewport.addEventListener('resize', () => {
-                syncTabletShell();
-                schedulePdfRefit();
-            });
-        }
+        window.addEventListener('orientationchange', onViewportChange);
+        if (window.visualViewport) window.visualViewport.addEventListener('resize', onViewportChange);
+        window.addEventListener('resize', onViewportChange);
 
         window.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible' && pdfDoc && !document.getElementById('pdf-viewer-container').classList.contains('hidden')) {
                 requestPdfWakeLock();
             }
-        });
-        window.addEventListener('resize', () => {
-            syncTabletShell();
-            schedulePdfRefit();
         });
         window.addEventListener('popstate', () => {
             if (!viewerHistoryActive) return;
@@ -1855,9 +1906,10 @@
             setPdfLoadingCover(true);
             document.getElementById('pdf-viewer-container').classList.remove('hidden');
             document.getElementById('pdf-viewer-container').classList.remove('reader-mode');
+            document.documentElement.classList.add('pdf-open');
             updateViewerToggleIcon(false);
             setViewportMeta(true);
-            if (!isAndroidDevice()) enterPdfFullscreen();
+            ignorePdfRefitEvents(800);
 
             bindViewerCanvases();
             scoreStage.style.transformOrigin = 'top center';
@@ -1898,6 +1950,7 @@
                 document.getElementById('annotation-exit-dialog')?.remove();
                 setPdfLoadingCover(true);
                 wipeViewerSurfaces();
+                document.documentElement.classList.remove('pdf-open');
                 await releasePdfWakeLock();
                 await exitPdfFullscreen();
                 setViewportMeta(false);
@@ -1918,56 +1971,59 @@
         }
 
         async function renderPage(num) {
+            if (!pdfDoc) return;
             pageRendering = true;
-            const page = await pdfDoc.getPage(num);
-            const baseViewport = page.getViewport({ scale: 1 });
-            const availableWidth = viewerFitWidth();
-            minimumScoreScale = Math.max(0.5, availableWidth / baseViewport.width);
-            scale = minimumScoreScale;
-            const viewport = page.getViewport({ scale: scale });
-            const outputScale = window.devicePixelRatio || 1;
-            const pixelWidth = Math.floor(viewport.width * outputScale);
-            const pixelHeight = Math.floor(viewport.height * outputScale);
+            ignorePdfRefitEvents(700);
+            try {
+                const page = await pdfDoc.getPage(num);
+                const baseViewport = page.getViewport({ scale: 1 });
+                const availableWidth = viewerFitWidth();
+                minimumScoreScale = Math.max(0.5, availableWidth / baseViewport.width);
+                scale = minimumScoreScale;
+                const viewport = page.getViewport({ scale: scale });
+                const outputScale = pdfOutputScale(viewport.width, viewport.height);
+                const pixelWidth = Math.max(1, Math.floor(viewport.width * outputScale));
+                const pixelHeight = Math.max(1, Math.floor(viewport.height * outputScale));
 
-            if (!pdfScratchCanvas) pdfScratchCanvas = document.createElement('canvas');
-            pdfScratchCanvas.width = pixelWidth;
-            pdfScratchCanvas.height = pixelHeight;
-            const scratchCtx = pdfScratchCanvas.getContext('2d', { alpha: false });
-            await page.render({
-                canvasContext: scratchCtx,
-                viewport,
-                transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null
-            }).promise;
-            scratchCtx.save();
-            scratchCtx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
-            applyWatermarks(scratchCtx, viewport.width, viewport.height);
-            scratchCtx.restore();
+                if (!pdfScratchCanvas) pdfScratchCanvas = document.createElement('canvas');
+                if (pdfScratchCanvas.width !== pixelWidth) pdfScratchCanvas.width = pixelWidth;
+                if (pdfScratchCanvas.height !== pixelHeight) pdfScratchCanvas.height = pixelHeight;
+                const scratchCtx = pdfScratchCanvas.getContext('2d', { alpha: false });
+                scratchCtx.setTransform(1, 0, 0, 1, 0, 0);
+                scratchCtx.fillStyle = '#ffffff';
+                scratchCtx.fillRect(0, 0, pixelWidth, pixelHeight);
+                await page.render({
+                    canvasContext: scratchCtx,
+                    viewport,
+                    transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null
+                }).promise;
+                scratchCtx.save();
+                scratchCtx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+                applyWatermarks(scratchCtx, viewport.width, viewport.height);
+                scratchCtx.restore();
 
-            pdfCanvas.width = pixelWidth;
-            pdfCanvas.height = pixelHeight;
-            pdfCanvas.style.width = `${viewport.width}px`;
-            pdfCanvas.style.height = `${viewport.height}px`;
-            pdfCtx.drawImage(pdfScratchCanvas, 0, 0);
+                resizeCanvasBuffer(pdfCanvas, pixelWidth, pixelHeight, viewport.width, viewport.height);
+                pdfCtx = pdfCanvas.getContext('2d');
+                pdfCtx.setTransform(1, 0, 0, 1, 0, 0);
+                pdfCtx.drawImage(pdfScratchCanvas, 0, 0);
 
-            drawCanvas.width = pixelWidth;
-            drawCanvas.height = pixelHeight;
-            drawCanvas.style.width = `${viewport.width}px`;
-            drawCanvas.style.height = `${viewport.height}px`;
-            highlightCanvas.width = pixelWidth;
-            highlightCanvas.height = pixelHeight;
-            highlightCanvas.style.width = `${viewport.width}px`;
-            highlightCanvas.style.height = `${viewport.height}px`;
+                resizeCanvasBuffer(drawCanvas, pixelWidth, pixelHeight, viewport.width, viewport.height);
+                resizeCanvasBuffer(highlightCanvas, pixelWidth, pixelHeight, viewport.width, viewport.height);
+                drawCtx = drawCanvas.getContext('2d');
+                highlightCtx = highlightCanvas.getContext('2d');
 
-            pageRendering = false;
-            lastPdfFitWidth = availableWidth;
-            showPageIndicator(num);
-            scoreZoom = 1;
-            panX = 0;
-            panY = 0;
-            scoreStage.style.transformOrigin = 'top center';
-            applyScoreZoom();
-            scoreStage?.classList.remove('pdf-resizing');
-            if (pdfRefitQueued) schedulePdfRefit();
+                lastPdfFitWidth = availableWidth;
+                showPageIndicator(num);
+                scoreZoom = 1;
+                panX = 0;
+                panY = 0;
+                scoreStage.style.transformOrigin = 'top center';
+                applyScoreZoom();
+                ignorePdfRefitEvents(450);
+            } finally {
+                pageRendering = false;
+                scoreStage?.classList.remove('pdf-resizing');
+            }
         }
 
         function playPageTurnHint(dir) {
