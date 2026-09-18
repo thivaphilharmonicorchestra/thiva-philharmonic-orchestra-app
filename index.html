@@ -326,6 +326,7 @@
     <script>
         const SUPABASE_URL = 'https://jigwfebaxiqumrltkgli.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_ORpUPeW5OSBOwTCTIKhPUw_SX8DtV9Z';
+        const APP_VERSION = '37';
         const AUTH_IDB_NAME = 'thiva-philharmonic-auth';
         const AUTH_IDB_DUMP_KEY = 'auth-dump';
 
@@ -1050,19 +1051,40 @@
                 'νίκος': 'Νίκο',
                 'παναγιώτης': 'Παναγιώτη',
                 'χρήστος': 'Χρήστο',
+                'χρηστος': 'Χρήστο',
                 'κωνσταντίνος': 'Κωνσταντίνε',
                 'ανδρέας': 'Ανδρέα',
-                'λουκάς': 'Λουκά'
+                'λουκάς': 'Λουκά',
+                'στέφανος': 'Στέφανε',
+                'στεφανος': 'Στέφανε',
+                'αλέξανδρος': 'Αλέξανδρε',
+                'αλεξανδρος': 'Αλέξανδρε',
+                'άγγελος': 'Άγγελε',
+                'αγγελος': 'Άγγελε',
+                'ευάγγελος': 'Ευάγγελε',
+                'ευαγγελος': 'Ευάγγελε',
+                'απόστολος': 'Απόστολε',
+                'αποστολος': 'Απόστολε',
+                'θεόδωρος': 'Θεόδωρε',
+                'θεοδωρος': 'Θεόδωρε',
+                'νικόλαος': 'Νικόλαε',
+                'νικολαος': 'Νικόλαε',
+                'φίλιππος': 'Φίλιππε',
+                'φιλιππος': 'Φίλιππε',
+                'στέλιος': 'Στέλιο',
+                'στελιος': 'Στέλιο'
             };
             if (irregularForms[normalizedName]) return irregularForms[normalizedName];
 
-            if (normalizedName.endsWith('ης')) {
+            if (normalizedName.endsWith('ης') || normalizedName.endsWith('ας')) {
                 return trimmedName.slice(0, -1);
             }
             if (normalizedName.endsWith('ος')) {
-                return trimmedName.slice(0, -1);
-            }
-            if (normalizedName.endsWith('ας')) {
+                const eSuffixes = ['στολος', 'νδρος', 'δωρος', 'λαος', 'τινος', 'ανος', 'γγελος', 'γελος', 'ιππος'];
+                if (eSuffixes.some(suffix => normalizedName.endsWith(suffix))
+                    || (normalizedName.endsWith('ιος') && normalizedName.length >= 8)) {
+                    return trimmedName.slice(0, -2) + 'ε';
+                }
                 return trimmedName.slice(0, -1);
             }
 
@@ -3281,6 +3303,7 @@
                 </div>
                 ${adminAssignmentsHtml}
                 <button onclick="handleLogout()" class="w-full bg-red-600/80 hover:bg-red-600 text-white font-semibold p-3 rounded-lg transition text-sm">Αποσύνδεση</button>
+                <p class="text-center text-[10px] text-slate-500 mt-4">Έκδοση ${APP_VERSION}</p>
             `;
             if (isAdminRole()) bindAdminAssignmentPanel();
         }
