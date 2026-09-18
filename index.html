@@ -2,15 +2,16 @@
 <html lang="el">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
     <title>Φιλαρμονική Ορχήστρα Θήβας</title>
     
-    <!-- PWA / Native App Meta Tags & Dynamic Icon Manifest -->
+    <!-- PWA / Native App Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Φιλαρμονική Θήβας">
     <link rel="apple-touch-icon" href="./thiva_app_icon.png">
-    <link rel="manifest" id="pwa-manifest">
+    <link rel="manifest" href="./manifest.webmanifest">
 
     <!-- Tailwind CSS for modern mobile-first styling -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -57,6 +58,15 @@
         html, body {
             touch-action: manipulation;
             overscroll-behavior-y: none;
+        }
+        html.tablet-shell #app,
+        html.tablet-shell #navbar {
+            max-width: none;
+        }
+        #pdf-viewer-container {
+            touch-action: none;
+            width: 100%;
+            max-width: none;
         }
         #app,
         #content {
@@ -253,12 +263,91 @@
     <script>
         const SUPABASE_URL = 'https://jigwfebaxiqumrltkgli.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_ORpUPeW5OSBOwTCTIKhPUw_SX8DtV9Z';
+        const AUTH_IDB_NAME = 'thiva-philharmonic-auth';
+        const AUTH_IDB_DUMP_KEY = 'auth-dump';
+
+        function openAuthIdb() {
+            return new Promise((resolve, reject) => {
+                if (!window.indexedDB) {
+                    reject(new Error('no indexedDB'));
+                    return;
+                }
+                const req = indexedDB.open(AUTH_IDB_NAME, 1);
+                req.onupgradeneeded = () => {
+                    if (!req.result.objectStoreNames.contains('kv')) req.result.createObjectStore('kv');
+                };
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        function isAuthStorageKey(key) {
+            return !!key && (key.includes('auth-token') || key.startsWith('sb-'));
+        }
+
+        function readAuthLocalStorageDump() {
+            const dump = {};
+            try {
+                for (let i = 0; i < localStorage.length; i += 1) {
+                    const key = localStorage.key(i);
+                    if (isAuthStorageKey(key)) dump[key] = localStorage.getItem(key);
+                }
+            } catch {
+                return dump;
+            }
+            return dump;
+        }
+
+        function persistAuthDump(dump) {
+            openAuthIdb().then(db => new Promise((resolve, reject) => {
+                const tx = db.transaction('kv', 'readwrite');
+                tx.objectStore('kv').put(JSON.stringify(dump || {}), AUTH_IDB_DUMP_KEY);
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+            })).catch(() => {});
+        }
+
+        async function restoreAuthStorage() {
+            try {
+                const db = await openAuthIdb();
+                const raw = await new Promise((resolve, reject) => {
+                    const tx = db.transaction('kv', 'readonly');
+                    const req = tx.objectStore('kv').get(AUTH_IDB_DUMP_KEY);
+                    req.onsuccess = () => resolve(req.result || '');
+                    req.onerror = () => reject(req.error);
+                });
+                if (!raw) return;
+                const dump = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                Object.entries(dump || {}).forEach(([key, value]) => {
+                    if (!isAuthStorageKey(key) || !value) return;
+                    try {
+                        if (!localStorage.getItem(key)) localStorage.setItem(key, value);
+                    } catch {}
+                });
+            } catch {}
+        }
+
+        const authStorage = {
+            getItem(key) {
+                try { return localStorage.getItem(key); } catch { return null; }
+            },
+            setItem(key, value) {
+                try { localStorage.setItem(key, value); } catch {}
+                persistAuthDump(readAuthLocalStorageDump());
+            },
+            removeItem(key) {
+                try { localStorage.removeItem(key); } catch {}
+                persistAuthDump(readAuthLocalStorageDump());
+            }
+        };
 
         const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
             auth: {
                 detectSessionInUrl: true,
                 persistSession: true,
-                autoRefreshToken: true
+                autoRefreshToken: true,
+                storage: authStorage,
+                flowType: 'pkce'
             }
         });
 
@@ -326,20 +415,6 @@
             }
         }
 
-        const manifestData = {
-            "name": "Φιλαρμονική Ορχήστρα Θήβας",
-            "short_name": "Φιλαρμονική",
-            "start_url": ".",
-            "display": "standalone",
-            "background_color": "#0f172a",
-            "theme_color": "#1e293b",
-            "icons": [
-                { "src": APP_ICON_URL, "sizes": "1024x1024", "type": "image/png", "purpose": "any" },
-                { "src": ANDROID_ICON_URL, "sizes": "1024x1024", "type": "image/png", "purpose": "maskable" }
-            ]
-        };
-        document.getElementById('pwa-manifest').href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify(manifestData));
-
         let currentUser = null;
         let currentProfile = null;
         let eventsViewMode = 'list'; 
@@ -384,6 +459,7 @@
         let pageSwipeStartY = null;
         let pageIndicatorTimer = null;
         let viewerResizeTimer = null;
+        let pdfRefitQueued = false;
         let annotationHistory = [];
         let annotationRedoHistory = [];
         let annotationsDirty = false;
@@ -406,20 +482,71 @@
 
         let pushSubscription = null;
 
+        function isTabletShell() {
+            const shortSide = Math.min(window.screen.width || 0, window.screen.height || 0);
+            return shortSide >= 600;
+        }
+
+        function syncTabletShell() {
+            document.documentElement.classList.toggle('tablet-shell', isTabletShell());
+        }
+
+        function resetBrowserZoom() {
+            const meta = document.querySelector('meta[name="viewport"]');
+            if (!meta) return;
+            const content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover';
+            meta.setAttribute('content', content);
+            window.scrollTo(0, 0);
+        }
+
+        function viewerFitWidth() {
+            const wrapper = document.getElementById('canvas-wrapper');
+            const layoutWidth = wrapper?.clientWidth
+                || document.getElementById('pdf-viewer-container')?.clientWidth
+                || document.documentElement.clientWidth
+                || window.innerWidth;
+            const visibleWidth = window.visualViewport?.width || layoutWidth;
+            return Math.max(280, Math.round(Math.min(layoutWidth, visibleWidth)) - 16);
+        }
+
+        function schedulePdfRefit() {
+            if (!pdfDoc || document.getElementById('pdf-viewer-container').classList.contains('hidden')) return;
+            clearTimeout(viewerResizeTimer);
+            viewerResizeTimer = setTimeout(async () => {
+                if (pageRendering) {
+                    pdfRefitQueued = true;
+                    return;
+                }
+                pdfRefitQueued = false;
+                resetBrowserZoom();
+                savePageToMemory();
+                await renderPage(pageNum);
+                restorePageFromMemory();
+                if (pdfRefitQueued) schedulePdfRefit();
+            }, 220);
+        }
+
+        syncTabletShell();
+        window.addEventListener('orientationchange', () => {
+            syncTabletShell();
+            resetBrowserZoom();
+            schedulePdfRefit();
+        });
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', () => {
+                syncTabletShell();
+                schedulePdfRefit();
+            });
+        }
+
         window.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible' && pdfDoc && !document.getElementById('pdf-viewer-container').classList.contains('hidden')) {
                 requestPdfWakeLock();
             }
         });
         window.addEventListener('resize', () => {
-            if (!pdfDoc || document.getElementById('pdf-viewer-container').classList.contains('hidden')) return;
-            clearTimeout(viewerResizeTimer);
-            viewerResizeTimer = setTimeout(async () => {
-                if (pageRendering) return;
-                savePageToMemory();
-                await renderPage(pageNum);
-                restorePageFromMemory();
-            }, 150);
+            syncTabletShell();
+            schedulePdfRefit();
         });
         window.addEventListener('popstate', () => {
             if (!viewerHistoryActive) return;
@@ -503,6 +630,8 @@
         }
 
         async function init() {
+            await restoreAuthStorage();
+            syncTabletShell();
             registerServiceWorker();
             initPushSupport();
             if (window.location.hash === '#notifications') activeTab = 'notifications';
@@ -1508,7 +1637,7 @@
             const page = await pdfDoc.getPage(num);
             const baseViewport = page.getViewport({ scale: 1 });
             const wrapper = document.getElementById('canvas-wrapper');
-            const availableWidth = Math.max(280, wrapper.clientWidth - 24);
+            const availableWidth = viewerFitWidth();
             minimumScoreScale = Math.max(0.5, availableWidth / baseViewport.width);
             scale = minimumScoreScale;
             const viewport = page.getViewport({ scale: scale });
@@ -1545,6 +1674,7 @@
             panY = 0;
             scoreStage.style.transformOrigin = 'top center';
             applyScoreZoom();
+            if (pdfRefitQueued) schedulePdfRefit();
         }
 
         function showPageIndicator(num) {
@@ -2898,7 +3028,7 @@
                             <div class="flex items-start justify-between mb-1">
                                 <div>
                                     <h4 class="text-sm font-bold text-emerald-300">🔔 Ειδοποιήσεις Ενεργές</h4>
-                                    <p class="text-[11px] text-emerald-400/80 mt-0.5">Θα λαμβάνετε ειδοποιήσεις για νέες ensembles, προβές & ανακοινώσεις.</p>
+                                    <p class="text-[11px] text-emerald-400/80 mt-0.5">Θα λαμβάνετε ειδοποιήσεις για νέο πρόγραμμα, ανακοινώσεις & αλλαγές.</p>
                                 </div>
                                 <span class="bg-emerald-600 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">ON</span>
                             </div>
@@ -2911,13 +3041,20 @@
                             <div class="flex items-start justify-between mb-1">
                                 <div>
                                     <h4 class="text-sm font-bold text-indigo-300">🔔 Push Ειδοποιήσεις</h4>
-                                    <p class="text-[11px] text-slate-400 mt-0.5">Ενεργοποιήστε για να λαμβάνετε άμεσες ειδοποιήσεις για νέο πρόγραμμα, σπουδαίες ανακοινώσεις & αλλαγές.</p>
+                                    <p class="text-[11px] text-slate-400 mt-0.5">Ενεργοποιήστε για να λαμβάνετε άμεσες ειδοποιήσεις για νέο πρόγραμμα, ανακοινώσεις & αλλαγές.</p>
                                 </div>
                             </div>
                             <button onclick="enablePushNotifications()" class="mt-2 w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-lg text-xs font-semibold transition">✦ Ενεργοποίηση Ειδοποιήσεων</button>
                         </div>
                     `;
                 }
+            } else {
+                pushSection = `
+                    <div class="bg-slate-800/60 border border-slate-700 rounded-xl p-4 mb-4">
+                        <h4 class="text-sm font-bold text-indigo-300">🔔 Push Ειδοποιήσεις</h4>
+                        <p class="text-[11px] text-slate-400 mt-1">Δεν υποστηρίζονται σε αυτή τη συσκευή. Στο iPhone/iPad χρειάζεται iOS 16.4 ή νεότερο, και η εφαρμογή πρέπει να είναι στην Αρχική οθόνη. Οι ανακοινώσεις εξακολουθούν να φαίνονται μέσα στην εφαρμογή.</p>
+                    </div>
+                `;
             }
 
             const adminAssignmentsHtml = isAdminRole() ? await buildAdminAssignmentPanel() : '';
