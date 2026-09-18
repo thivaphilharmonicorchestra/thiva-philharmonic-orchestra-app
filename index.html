@@ -708,8 +708,8 @@
         }
 
         function pdfOutputScale(cssWidth, cssHeight) {
-            const dpr = Math.min(2, window.devicePixelRatio || 1);
-            const maxPixels = 3500000;
+            const dpr = window.devicePixelRatio || 1;
+            const maxPixels = 16000000;
             const raw = Math.max(1, cssWidth * cssHeight * dpr * dpr);
             if (raw <= maxPixels) return dpr;
             return Math.max(1, Math.sqrt(maxPixels / Math.max(1, cssWidth * cssHeight)));
