@@ -121,6 +121,46 @@
             transform-origin: top center;
             transition: transform 80ms ease-out;
         }
+        #score-stage.pdf-resizing {
+            transition: none;
+        }
+        #pdf-loading-cover {
+            position: absolute;
+            inset: 0;
+            z-index: 25;
+            background: #020617;
+        }
+        #viewer-notice {
+            white-space: nowrap;
+            max-width: calc(100% - 24px);
+        }
+        .viewer-save-mark {
+            position: absolute;
+            inset: 0;
+            z-index: 55;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
+        .viewer-save-mark-box {
+            width: 72px;
+            height: 72px;
+            border-radius: 18px;
+            border: 2px solid rgba(255, 255, 255, 0.72);
+            background: rgba(15, 23, 42, 0.28);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: viewer-save-fade 1.35s ease forwards;
+        }
+        @keyframes viewer-save-fade {
+            0% { opacity: 0; transform: scale(0.92); }
+            14% { opacity: 1; transform: scale(1); }
+            62% { opacity: 1; transform: scale(1); }
+            100% { opacity: 0; transform: scale(0.98); }
+        }
         #score-stage.score-spring-back {
             transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
         }
@@ -258,6 +298,10 @@
         .push-switch.on::after {
             transform: translateX(20px);
         }
+        .push-switch.busy {
+            opacity: 0.65;
+            pointer-events: none;
+        }
         @media (orientation: landscape) and (max-height: 600px) {
             #app,
             #navbar,
@@ -308,6 +352,7 @@
                 <canvas id="draw-canvas" class="absolute inset-0 cursor-crosshair touch-none"></canvas>
             </div>
         </div>
+        <div id="pdf-loading-cover" class="hidden"></div>
 
         <div class="viewer-chrome annotation-island">
             <button onclick="setTool('hand')" id="tool-hand" aria-label="Χέρι" class="bg-indigo-600 text-white text-lg"><svg aria-hidden="true" class="h-5 w-5 mx-auto" viewBox="0 0 256 256" fill="currentColor"><path d="M188,48a27.75,27.75,0,0,0-12,2.71V44a28,28,0,0,0-54.65-8.6A28,28,0,0,0,80,60v64l-3.82-6.13a28,28,0,0,0-48.6,27.82c16,33.77,28.93,57.72,43.72,72.69C86.24,233.54,103.2,240,128,240a88.1,88.1,0,0,0,88-88V76A28,28,0,0,0,188,48Zm12,104a72.08,72.08,0,0,1-72,72c-20.38,0-33.51-4.88-45.33-16.85C69.44,193.74,57.26,171,41.9,138.58a6.36,6.36,0,0,0-.3-.58,12,12,0,0,1,20.79-12,1.76,1.76,0,0,0,.14.23l18.67,30A8,8,0,0,0,96,152V60a12,12,0,0,1,24,0v60a8,8,0,0,0,16,0V44a12,12,0,0,1,24,0v76a8,8,0,0,0,16,0V76a12,12,0,0,1,24,0Z"></path></svg></button>
@@ -327,6 +372,7 @@
         const SUPABASE_URL = 'https://jigwfebaxiqumrltkgli.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_ORpUPeW5OSBOwTCTIKhPUw_SX8DtV9Z';
         const AUTH_IDB_NAME = 'thiva-philharmonic-auth';
+        const PUSH_OPT_KEY = 'thiva-push-opt-in';
         const AUTH_IDB_DUMP_KEY = 'auth-dump';
 
         function openAuthIdb() {
@@ -525,6 +571,8 @@
         let pageIndicatorTimer = null;
         let viewerResizeTimer = null;
         let pdfRefitQueued = false;
+        let lastPdfFitWidth = 0;
+        let pushBusy = false;
         let annotationHistory = [];
         let annotationRedoHistory = [];
         let annotationsDirty = false;
@@ -655,27 +703,51 @@
             return Math.max(280, Math.round(Math.min(layoutWidth, visibleWidth)) - 16);
         }
 
+        function applyPdfCssFit() {
+            if (!pdfCanvas || !pdfDoc) return;
+            const width = viewerFitWidth();
+            const currentW = parseFloat(pdfCanvas.style.width) || 0;
+            const currentH = parseFloat(pdfCanvas.style.height) || 0;
+            if (!currentW || !currentH) return;
+            if (Math.abs(currentW - width) < 1) return;
+            const height = currentH * (width / currentW);
+            scoreStage?.classList.add('pdf-resizing');
+            [pdfCanvas, drawCanvas, highlightCanvas].forEach(canvas => {
+                if (!canvas) return;
+                canvas.style.width = `${width}px`;
+                canvas.style.height = `${height}px`;
+            });
+        }
+
         function schedulePdfRefit() {
             if (!pdfDoc || document.getElementById('pdf-viewer-container').classList.contains('hidden')) return;
+            applyPdfCssFit();
             clearTimeout(viewerResizeTimer);
             viewerResizeTimer = setTimeout(async () => {
+                if (!pdfDoc || document.getElementById('pdf-viewer-container').classList.contains('hidden')) return;
+                const width = viewerFitWidth();
                 if (pageRendering) {
                     pdfRefitQueued = true;
                     return;
                 }
+                if (lastPdfFitWidth && Math.abs(width - lastPdfFitWidth) < 2) {
+                    applyPdfCssFit();
+                    scoreStage?.classList.remove('pdf-resizing');
+                    return;
+                }
                 pdfRefitQueued = false;
-                resetBrowserZoom();
                 savePageToMemory();
                 await renderPage(pageNum);
-                restorePageFromMemory();
+                await restorePageFromMemory();
+                scoreStage?.classList.remove('pdf-resizing');
                 if (pdfRefitQueued) schedulePdfRefit();
-            }, 220);
+            }, 320);
         }
 
         syncTabletShell();
         window.addEventListener('orientationchange', () => {
             syncTabletShell();
-            resetBrowserZoom();
+            applyPdfCssFit();
             schedulePdfRefit();
         });
         if (window.visualViewport) {
@@ -867,7 +939,8 @@
             try {
                 const reg = await registerServiceWorker();
                 if (!reg) return;
-                pushSubscription = await reg.pushManager.getSubscription();
+                const sub = await reg.pushManager.getSubscription();
+                pushSubscription = localStorage.getItem(PUSH_OPT_KEY) === '0' ? null : sub;
             } catch (e) {
                 console.warn('Push init failed:', e);
             }
@@ -1739,23 +1812,7 @@
             });
         }
 
-        async function openPdfViewer(pdfUrl, pieceId) {
-            if (!viewerHistoryActive) {
-                history.pushState({ ...(history.state || {}), pdfViewer: true }, '');
-                viewerHistoryActive = true;
-            }
-            activePieceId = pieceId;
-            pageNum = 1;
-            Object.keys(pageAnnotations).forEach(page => delete pageAnnotations[page]);
-            annotationHistory = [];
-            annotationRedoHistory = [];
-            annotationsDirty = false;
-            document.getElementById('pdf-viewer-container').classList.remove('hidden');
-            document.getElementById('pdf-viewer-container').classList.remove('reader-mode');
-            updateViewerToggleIcon(false);
-            setViewportMeta(true);
-            if (!isAndroidDevice()) enterPdfFullscreen();
-            
+        function bindViewerCanvases() {
             pdfCanvas = document.getElementById('pdf-canvas');
             pdfCtx = pdfCanvas.getContext('2d');
             highlightCanvas = document.getElementById('highlight-canvas');
@@ -1763,6 +1820,46 @@
             drawCanvas = document.getElementById('draw-canvas');
             drawCtx = drawCanvas.getContext('2d');
             scoreStage = document.getElementById('score-stage');
+        }
+
+        function wipeViewerSurfaces() {
+            bindViewerCanvases();
+            [pdfCanvas, drawCanvas, highlightCanvas].forEach(canvas => {
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                canvas.width = 1;
+                canvas.height = 1;
+                canvas.style.width = '0px';
+                canvas.style.height = '0px';
+            });
+            Object.keys(pageAnnotations).forEach(page => delete pageAnnotations[page]);
+            annotationHistory = [];
+            annotationRedoHistory = [];
+            lastPdfFitWidth = 0;
+        }
+
+        function setPdfLoadingCover(visible) {
+            document.getElementById('pdf-loading-cover')?.classList.toggle('hidden', !visible);
+        }
+
+        async function openPdfViewer(pdfUrl, pieceId) {
+            if (!viewerHistoryActive) {
+                history.pushState({ ...(history.state || {}), pdfViewer: true }, '');
+                viewerHistoryActive = true;
+            }
+            activePieceId = pieceId;
+            pageNum = 1;
+            annotationsDirty = false;
+            wipeViewerSurfaces();
+            setPdfLoadingCover(true);
+            document.getElementById('pdf-viewer-container').classList.remove('hidden');
+            document.getElementById('pdf-viewer-container').classList.remove('reader-mode');
+            updateViewerToggleIcon(false);
+            setViewportMeta(true);
+            if (!isAndroidDevice()) enterPdfFullscreen();
+
+            bindViewerCanvases();
             scoreStage.style.transformOrigin = 'top center';
 
             setupDrawingEvents();
@@ -1774,7 +1871,8 @@
                 const loadingTask = pdfjsLib.getDocument(pdfUrl);
                 pdfDoc = await loadingTask.promise;
                 await renderPage(pageNum);
-                loadSavedAnnotations();
+                await loadSavedAnnotations();
+                setPdfLoadingCover(false);
             } catch (error) {
                 alert('Σφάλμα φόρτωσης PDF: ' + error.message);
                 closePdfViewer();
@@ -1798,6 +1896,8 @@
                     viewerHistoryActive = false;
                 }
                 document.getElementById('annotation-exit-dialog')?.remove();
+                setPdfLoadingCover(true);
+                wipeViewerSurfaces();
                 await releasePdfWakeLock();
                 await exitPdfFullscreen();
                 setViewportMeta(false);
@@ -1859,12 +1959,14 @@
             highlightCanvas.style.height = `${viewport.height}px`;
 
             pageRendering = false;
+            lastPdfFitWidth = availableWidth;
             showPageIndicator(num);
             scoreZoom = 1;
             panX = 0;
             panY = 0;
             scoreStage.style.transformOrigin = 'top center';
             applyScoreZoom();
+            scoreStage?.classList.remove('pdf-resizing');
             if (pdfRefitQueued) schedulePdfRefit();
         }
 
@@ -2135,7 +2237,7 @@
             annotationHistory = [];
             annotationRedoHistory = [];
             await renderPage(pageNum);
-            restorePageFromMemory();
+            await restorePageFromMemory();
             playPageTurnHint(val);
         }
 
@@ -2149,21 +2251,33 @@
             };
         }
 
-        function restorePageFromMemory() {
+        async function restorePageFromMemory() {
+            if (!drawCanvas || !highlightCanvas) return;
             clearDrawingCanvas();
             const saved = pageAnnotations[pageNum];
             if (!saved) return;
             const drawing = typeof saved === 'string' ? saved : saved.drawing;
             const highlighting = typeof saved === 'string' ? null : saved.highlighting;
-            restoreCanvasImage(drawing, drawCtx, drawCanvas);
-            restoreCanvasImage(highlighting, highlightCtx, highlightCanvas);
+            await Promise.all([
+                restoreCanvasImage(drawing, drawCtx, drawCanvas),
+                restoreCanvasImage(highlighting, highlightCtx, highlightCanvas)
+            ]);
         }
 
         function restoreCanvasImage(source, context, canvas) {
-            if (!source || !context || !canvas) return;
-            const img = new Image();
-            img.onload = () => context.drawImage(img, 0, 0, canvas.width, canvas.height);
-            img.src = source;
+            return new Promise(resolve => {
+                if (!source || !context || !canvas) {
+                    resolve();
+                    return;
+                }
+                const img = new Image();
+                img.onload = () => {
+                    context.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    resolve();
+                };
+                img.onerror = () => resolve();
+                img.src = source;
+            });
         }
 
         function setupDrawingEvents() {
@@ -2446,23 +2560,31 @@
 
         function saveAnnotations() {
             persistAnnotations();
-            showViewerNotice('Οι σημειώσεις αποθηκεύτηκαν στη συσκευή σας.');
+            showViewerNotice('Οι σημειώσεις αποθηκεύτηκαν.');
         }
 
         function showViewerNotice(message) {
             const viewer = document.getElementById('pdf-viewer-container');
             if (!viewer) return;
             viewer.querySelector('#viewer-notice')?.remove();
+            viewer.querySelector('.viewer-save-mark')?.remove();
             const notice = document.createElement('div');
             notice.id = 'viewer-notice';
-            notice.className = 'absolute left-1/2 z-[60] -translate-x-1/2 rounded-full bg-slate-800/95 px-4 py-2 text-xs text-slate-100 shadow-lg';
+            notice.className = 'absolute left-1/2 z-[60] -translate-x-1/2 rounded-full bg-slate-800/95 px-4 py-2 text-[11px] leading-none text-slate-100 shadow-lg';
             notice.style.bottom = 'calc(max(12px, env(safe-area-inset-bottom)) + 64px)';
             notice.textContent = message;
+            const mark = document.createElement('div');
+            mark.className = 'viewer-save-mark';
+            mark.innerHTML = `<div class="viewer-save-mark-box"><svg aria-hidden="true" class="h-9 w-9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 9.5 17 19 7"></path></svg></div>`;
             viewer.appendChild(notice);
-            setTimeout(() => notice.remove(), 1800);
+            viewer.appendChild(mark);
+            setTimeout(() => {
+                notice.remove();
+                mark.remove();
+            }, 1400);
         }
 
-        function loadSavedAnnotations() {
+        async function loadSavedAnnotations() {
             const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
             const storageKey = `annotations_${userEmail}_piece_${activePieceId}`;
             const saved = localStorage.getItem(storageKey);
@@ -2470,7 +2592,7 @@
                 try {
                     const parsed = JSON.parse(saved);
                     Object.keys(parsed).forEach(p => { pageAnnotations[p] = parsed[p]; });
-                    restorePageFromMemory();
+                    await restorePageFromMemory();
                     annotationsDirty = false;
                 } catch (e) {
                     console.error(e);
@@ -3040,8 +3162,27 @@
         }
 
         async function togglePushNotifications() {
-            if (pushSubscription) await disablePushNotifications();
-            else await enablePushNotifications();
+            if (pushBusy) return;
+            pushBusy = true;
+            setPushSwitchBusy(true);
+            try {
+                if (pushSubscription) await disablePushNotifications();
+                else await enablePushNotifications();
+            } finally {
+                pushBusy = false;
+                setPushSwitchBusy(false);
+            }
+        }
+
+        function setPushSwitchBusy(busy) {
+            document.querySelector('.push-switch')?.classList.toggle('busy', !!busy);
+        }
+
+        function setPushSwitchState(on) {
+            const button = document.querySelector('.push-switch');
+            if (!button) return;
+            button.classList.toggle('on', !!on);
+            button.setAttribute('aria-checked', on ? 'true' : 'false');
         }
 
         async function enablePushNotifications() {
@@ -3056,19 +3197,24 @@
                 return;
             }
 
+            setPushSwitchState(true);
             try {
                 const reg = await registerServiceWorker();
                 if (!reg) throw new Error('Δεν ήταν δυνατή η ενεργοποίηση του Service Worker.');
                 const permission = await Notification.requestPermission();
                 if (permission !== 'granted') {
+                    localStorage.setItem(PUSH_OPT_KEY, '0');
+                    setPushSwitchState(false);
                     alert('Η άδεια ειδοποιήσεων δεν εγκρίθηκε.');
                     return;
                 }
 
-                pushSubscription = await reg.pushManager.subscribe({
+                const existingSub = await reg.pushManager.getSubscription();
+                pushSubscription = existingSub || await reg.pushManager.subscribe({
                     userVisibleOnly: true,
                     applicationServerKey: appKey
                 });
+                localStorage.setItem(PUSH_OPT_KEY, '1');
 
                 const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
                 const subJSON = pushSubscription.toJSON();
@@ -3089,26 +3235,32 @@
                 renderProfileTab();
             } catch (e) {
                 console.error(e);
+                pushSubscription = null;
+                localStorage.setItem(PUSH_OPT_KEY, '0');
+                setPushSwitchState(false);
                 alert('Σφάλμα ενεργοποίησης ειδοποιήσεων: ' + e.message);
             }
         }
 
         async function disablePushNotifications() {
+            const existing = pushSubscription;
+            pushSubscription = null;
+            setPushSwitchState(false);
             try {
-                if (pushSubscription) {
-                    const subJSON = pushSubscription.toJSON();
-                    await pushSubscription.unsubscribe().catch(() => {});
-
+                localStorage.setItem(PUSH_OPT_KEY, '0');
+                if (existing) {
+                    const subJSON = existing.toJSON();
                     const { error: delErr } = await supabaseClient
                         .from('push_subscriptions')
                         .delete()
                         .eq('endpoint', subJSON.endpoint);
                     if (delErr) console.warn('DB delete warning:', delErr);
                 }
-                pushSubscription = null;
-                showAppToast('Οι ειδοποιήσεις απενεργοποιήθηκαν.');
+                showAppToast('Οι ειδοποιήσεις απενεργοποιήθηκαν.', 'notify-off');
                 renderProfileTab();
             } catch (e) {
+                pushSubscription = existing;
+                setPushSwitchState(true);
                 alert('Σφάλμα απενεργοποίησης: ' + e.message);
             }
         }
@@ -3236,13 +3388,19 @@
             const toast = document.createElement('div');
             toast.id = 'app-toast';
             toast.className = 'fixed inset-0 z-[10000] bg-black/50 flex items-center justify-center p-4';
+            const off = variant === 'notify-off';
+            const border = off ? 'border-red-700/60' : 'border-emerald-700/60';
             const icon = variant === 'notify'
                 ? `<div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400">
                     <svg aria-hidden="true" class="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10 19a2 2 0 0 0 4 0"></path><path d="m9 12 2 2 4-4"></path></svg>
                    </div>`
+                : off
+                ? `<div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-red-500/15 text-red-400">
+                    <svg aria-hidden="true" class="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10 19a2 2 0 0 0 4 0"></path><path d="M9.2 10.2 14.8 15.8"></path><path d="M14.8 10.2 9.2 15.8"></path></svg>
+                   </div>`
                 : `<div class="text-3xl mb-2">✅</div>`;
             toast.innerHTML = `
-                <div class="bg-slate-800 border border-emerald-700/60 rounded-2xl p-5 w-full max-w-sm text-center">
+                <div class="bg-slate-800 border ${border} rounded-2xl p-5 w-full max-w-sm text-center">
                     ${icon}
                     <p class="text-sm text-slate-100 mb-4">${escapeHtml(message)}</p>
                     <button class="w-full py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold" onclick="document.getElementById('app-toast')?.remove()">Κλείσιμο</button>
