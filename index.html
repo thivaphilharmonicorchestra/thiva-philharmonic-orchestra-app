@@ -326,7 +326,6 @@
     <script>
         const SUPABASE_URL = 'https://jigwfebaxiqumrltkgli.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_ORpUPeW5OSBOwTCTIKhPUw_SX8DtV9Z';
-        const APP_VERSION = '37';
         const AUTH_IDB_NAME = 'thiva-philharmonic-auth';
         const AUTH_IDB_DUMP_KEY = 'auth-dump';
 
@@ -1072,7 +1071,11 @@
                 'φίλιππος': 'Φίλιππε',
                 'φιλιππος': 'Φίλιππε',
                 'στέλιος': 'Στέλιο',
-                'στελιος': 'Στέλιο'
+                'στελιος': 'Στέλιο',
+                'χαράλαμπος': 'Χαράλαμπε',
+                'χαραλαμπος': 'Χαράλαμπε',
+                'οδυσσέας': 'Οδυσσέα',
+                'οδυσσεας': 'Οδυσσέα'
             };
             if (irregularForms[normalizedName]) return irregularForms[normalizedName];
 
@@ -1080,7 +1083,7 @@
                 return trimmedName.slice(0, -1);
             }
             if (normalizedName.endsWith('ος')) {
-                const eSuffixes = ['στολος', 'νδρος', 'δωρος', 'λαος', 'τινος', 'ανος', 'γγελος', 'γελος', 'ιππος'];
+                const eSuffixes = ['στολος', 'νδρος', 'δωρος', 'λαος', 'τινος', 'ανος', 'γγελος', 'γελος', 'ιππος', 'λαμπος'];
                 if (eSuffixes.some(suffix => normalizedName.endsWith(suffix))
                     || (normalizedName.endsWith('ιος') && normalizedName.length >= 8)) {
                     return trimmedName.slice(0, -2) + 'ε';
@@ -3303,7 +3306,6 @@
                 </div>
                 ${adminAssignmentsHtml}
                 <button onclick="handleLogout()" class="w-full bg-red-600/80 hover:bg-red-600 text-white font-semibold p-3 rounded-lg transition text-sm">Αποσύνδεση</button>
-                <p class="text-center text-[10px] text-slate-500 mt-4">Έκδοση ${APP_VERSION}</p>
             `;
             if (isAdminRole()) bindAdminAssignmentPanel();
         }
