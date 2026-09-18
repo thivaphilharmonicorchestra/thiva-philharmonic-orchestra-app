@@ -2,7 +2,7 @@
 <html lang="el">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <title>Φιλαρμονική Ορχήστρα Θήβας</title>
     
     <!-- PWA / Native App Meta Tags -->
@@ -59,14 +59,18 @@
             touch-action: manipulation;
             overscroll-behavior-y: none;
         }
-        html.tablet-shell #app,
-        html.tablet-shell #navbar {
+        html.tablet-shell:not(.auth-narrow) #app,
+        html.tablet-shell:not(.auth-narrow) #navbar {
             max-width: none;
+        }
+        html.auth-narrow #app {
+            max-width: 28rem;
         }
         #pdf-viewer-container {
             touch-action: none;
             width: 100%;
             max-width: none;
+            padding-top: env(safe-area-inset-top, 0px);
         }
         #app,
         #content {
@@ -491,12 +495,42 @@
             document.documentElement.classList.toggle('tablet-shell', isTabletShell());
         }
 
-        function resetBrowserZoom() {
+        function setAuthNarrow(on) {
+            document.documentElement.classList.toggle('auth-narrow', !!on);
+        }
+
+        function setViewportMeta(cover) {
             const meta = document.querySelector('meta[name="viewport"]');
             if (!meta) return;
-            const content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover';
-            meta.setAttribute('content', content);
+            meta.setAttribute(
+                'content',
+                cover
+                    ? 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'
+                    : 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no'
+            );
             window.scrollTo(0, 0);
+        }
+
+        function resetBrowserZoom() {
+            const pdfOpen = pdfDoc && !document.getElementById('pdf-viewer-container')?.classList.contains('hidden');
+            setViewportMeta(!!pdfOpen);
+        }
+
+        async function enterPdfFullscreen() {
+            const el = document.getElementById('pdf-viewer-container');
+            if (!el) return;
+            try {
+                if (document.fullscreenElement || document.webkitFullscreenElement) return;
+                if (el.requestFullscreen) await el.requestFullscreen();
+                else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+            } catch {}
+        }
+
+        async function exitPdfFullscreen() {
+            try {
+                if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen();
+                else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+            } catch {}
         }
 
         function viewerFitWidth() {
@@ -583,6 +617,7 @@
         }
 
         function renderAuthLoading() {
+            setAuthNarrow(true);
             document.getElementById('navbar').classList.add('hidden');
             document.getElementById('content').innerHTML = `
                 <div class="flex flex-col items-center justify-center min-h-[85vh] text-center">
@@ -928,6 +963,7 @@
         }
 
         function renderLogin(message = '') {
+            setAuthNarrow(true);
             document.getElementById('navbar').classList.add('hidden');
             document.getElementById('content').innerHTML = `
                 <div class="flex flex-col items-center justify-center min-h-[85vh] text-center">
@@ -956,6 +992,7 @@
                     ? 'Ορίστε έναν νέο κωδικό για να συνδεθείτε ξανά στην εφαρμογή.'
                     : 'Καλώς ήρθατε. Ορίστε τον κωδικό σας για να ολοκληρώσετε την πρόσκληση.');
             document.getElementById('navbar').classList.add('hidden');
+            setAuthNarrow(true);
             document.getElementById('content').innerHTML = `
                 <div class="flex flex-col items-center justify-center min-h-[85vh] text-center">
                     <img src="${LOGO_URL}" alt="Logo" class="w-20 h-20 mb-3 object-contain drop-shadow-md">
@@ -1054,6 +1091,7 @@
         }
 
         async function renderApp() {
+            setAuthNarrow(false);
             document.getElementById('navbar').classList.remove('hidden');
             ['music', 'events', 'home', 'attendance', 'profile'].forEach(t => {
                 const btn = document.getElementById(`nav-${t}`);
@@ -1576,6 +1614,8 @@
             document.getElementById('pdf-viewer-container').classList.remove('hidden');
             document.getElementById('pdf-viewer-container').classList.remove('reader-mode');
             updateViewerToggleIcon(false);
+            setViewportMeta(true);
+            enterPdfFullscreen();
             
             pdfCanvas = document.getElementById('pdf-canvas');
             pdfCtx = pdfCanvas.getContext('2d');
@@ -1619,6 +1659,8 @@
                 if (shouldSave) persistAnnotations();
             }
             await releasePdfWakeLock();
+            await exitPdfFullscreen();
+            setViewportMeta(false);
             document.getElementById('pdf-viewer-container').classList.add('hidden');
             pdfDoc = null;
             pageNum = 1;
