@@ -1,0 +1,13 @@
+{
+  "name": "Φιλαρμονική Ορχήστρα Θήβας",
+  "short_name": "Φιλαρμονική",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#1e293b",
+  "icons": [
+    { "src": "./thiva_app_icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" },
+    { "src": "./thiva_app_icon_android.png", "sizes": "1024x1024", "type": "image/png", "purpose": "maskable" }
+  ]
+}
