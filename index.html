@@ -57,7 +57,36 @@
         }
         html, body {
             touch-action: manipulation;
-            overscroll-behavior-y: none;
+            overscroll-behavior: none;
+            height: 100%;
+            overflow: hidden;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+        }
+        body {
+            min-height: 100%;
+            min-height: 100dvh;
+        }
+        input, textarea, select {
+            -webkit-user-select: text;
+            user-select: text;
+            -webkit-touch-callout: default;
+        }
+        #app {
+            height: 100%;
+            max-height: 100dvh;
+            overflow: hidden;
+            min-height: 0;
+        }
+        #app,
+        #content {
+            overscroll-behavior: none;
+        }
+        #content {
+            min-height: 0;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
         }
         html.tablet-shell:not(.auth-narrow) #app,
         html.tablet-shell:not(.auth-narrow) #navbar {
@@ -197,11 +226,37 @@
             background: transparent !important;
             transform: none !important;
         }
-        .width-option span {
+        .width-option svg {
             display: block;
-            width: 26px;
+            width: 34px;
+            height: 22px;
+        }
+        .push-switch {
+            position: relative;
+            width: 48px;
+            height: 28px;
             border-radius: 999px;
-            background: #cbd5e1;
+            background: #334155;
+            border: 0;
+            flex-shrink: 0;
+            padding: 0;
+        }
+        .push-switch.on {
+            background: #059669;
+        }
+        .push-switch::after {
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 22px;
+            height: 22px;
+            border-radius: 999px;
+            background: #fff;
+            transition: transform 180ms ease;
+        }
+        .push-switch.on::after {
+            transform: translateX(20px);
         }
         @media (orientation: landscape) and (max-height: 600px) {
             #app,
@@ -215,7 +270,7 @@
         }
     </style>
 </head>
-<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col">
+<body class="bg-slate-900 text-slate-100 h-full overflow-hidden flex flex-col">
 
     <!-- APP CONTAINER -->
     <div id="app" class="max-w-md mx-auto w-full flex-1 flex flex-col justify-between p-4">
@@ -499,6 +554,51 @@
             document.documentElement.classList.toggle('tablet-shell', isTabletShell());
         }
 
+        function isIosDevice() {
+            return /iPad|iPhone|iPod/.test(navigator.userAgent)
+                || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        }
+
+        function isStandaloneDisplay() {
+            return window.matchMedia('(display-mode: standalone)').matches
+                || window.navigator.standalone === true;
+        }
+
+        function isAndroidDevice() {
+            return /Android/i.test(navigator.userAgent);
+        }
+
+        function pushUnsupportedMessage() {
+            const notices = ' Οι ανακοινώσεις εξακολουθούν να φαίνονται μέσα στην εφαρμογή.';
+            if (isIosDevice() && !isStandaloneDisplay()) {
+                return 'Στο Safari οι ειδοποιήσεις δεν ενεργοποιούνται. Προσθέστε την εφαρμογή στην Αρχική οθόνη και ανοίξτε την από εκεί.' + notices;
+            }
+            if (isIosDevice()) {
+                return 'Αυτή η έκδοση iOS δεν υποστηρίζει ειδοποιήσεις εφαρμογής. Χρειάζεται iOS 16.4 ή νεότερο.' + notices;
+            }
+            if (isAndroidDevice()) {
+                return 'Αυτό το πρόγραμμα περιήγησης δεν υποστηρίζει ειδοποιήσεις. Ανοίξτε την εφαρμογή σε Chrome.' + notices;
+            }
+            return 'Οι ειδοποιήσεις δεν υποστηρίζονται σε αυτό το πρόγραμμα περιήγησης.' + notices;
+        }
+
+        function lockIosOverscroll() {
+            const scroller = document.getElementById('content');
+            if (!scroller || scroller.dataset.overscrollLocked) return;
+            scroller.dataset.overscrollLocked = '1';
+            let startY = 0;
+            scroller.addEventListener('touchstart', (event) => {
+                if (event.touches.length === 1) startY = event.touches[0].clientY;
+            }, { passive: true });
+            scroller.addEventListener('touchmove', (event) => {
+                if (event.touches.length !== 1) return;
+                const dy = event.touches[0].clientY - startY;
+                const atTop = scroller.scrollTop <= 0 && dy > 0;
+                const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1 && dy < 0;
+                if (atTop || atBottom) event.preventDefault();
+            }, { passive: false });
+        }
+
         function setAuthNarrow(on) {
             document.documentElement.classList.toggle('auth-narrow', !!on);
         }
@@ -671,6 +771,7 @@
         async function init() {
             await restoreAuthStorage();
             syncTabletShell();
+            lockIosOverscroll();
             registerServiceWorker();
             initPushSupport();
             if (window.location.hash === '#notifications') activeTab = 'notifications';
@@ -973,7 +1074,7 @@
                 <div class="flex flex-col items-center justify-center min-h-[85vh] text-center">
                     <img src="${LOGO_URL}" alt="Logo" class="w-24 h-24 mb-4 object-contain drop-shadow-md">
                     <h1 class="text-2xl font-bold text-indigo-400 mb-1">Φιλαρμονική Ορχήστρα Θήβας</h1>
-                    <p class="text-slate-400 mb-6 text-sm">Συνδεθείτε για να συνεχίσετε.</p>
+                    <p class="text-slate-400 mb-6 text-sm">Συνδεθείτε για να συνεχίσετε</p>
                     <div class="w-full bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
                         <input type="email" id="email" placeholder="Διεύθυνση Email" class="w-full mb-3 p-3 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-indigo-500">
                         <input type="password" id="password" placeholder="Κωδικός πρόσβασης" class="w-full mb-4 p-3 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-indigo-500">
@@ -2173,7 +2274,7 @@
                     : [[12, 'Μικρή'], [20, 'Μεσαία'], [32, 'Μεγάλη']];
             options.innerHTML = `
                 ${colors.map(([color, label]) => `<button aria-label="${label}" title="${label}" class="${setting.color === color ? 'selected' : ''}" style="background:${color}" onclick="setAnnotationColor('${color}')"></button>`).join('')}
-                ${widths.map(([width, label]) => `<button aria-label="${label}" title="${label}" class="width-option ${setting.width === width ? 'selected' : ''}" onclick="setAnnotationWidth(${width})"><span style="height:${getWidthPreviewHeight(width)}px"></span></button>`).join('')}
+                ${widths.map(([width, label]) => `<button aria-label="${label}" title="${label}" class="width-option ${setting.width === width ? 'selected' : ''}" onclick="setAnnotationWidth(${width})">${widthPreviewMarkup(width)}</button>`).join('')}
             `;
             options.classList.add('open');
         }
@@ -2188,9 +2289,18 @@
             document.getElementById('annotation-options').classList.remove('open');
         }
 
-        function getWidthPreviewHeight(width) {
-            const factor = currentTool === 'pen' ? 2 : currentTool === 'highlighter' ? 0.55 : 0.4;
-            return Math.max(4, Math.min(16, width * factor));
+        function widthPreviewMarkup(width) {
+            const stroke = currentTool === 'pen'
+                ? Math.max(2.2, Math.min(8, width * 1.2))
+                : Math.max(5, Math.min(14, width * 0.45));
+            if (currentTool === 'eraser') {
+                const radius = Math.max(3.5, Math.min(10.5, width * 0.32));
+                return `<svg viewBox="0 0 34 22" aria-hidden="true"><circle cx="17" cy="11" r="${radius}" fill="#cbd5e1"></circle></svg>`;
+            }
+            if (currentTool === 'highlighter') {
+                return `<svg viewBox="0 0 34 22" aria-hidden="true"><path d="M4 15 C11 5, 23 17, 30 8" fill="none" stroke="#cbd5e1" stroke-width="${stroke}" stroke-linecap="square" stroke-linejoin="miter"></path></svg>`;
+            }
+            return `<svg viewBox="0 0 34 22" aria-hidden="true"><path d="M4 15 C11 5, 23 17, 30 8" fill="none" stroke="#cbd5e1" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
         }
 
         function clearCanvas() {
@@ -2421,7 +2531,7 @@
             `;
             
             if (isAdmin) {
-                html += `<p class="text-xs text-slate-400 mb-2">Συγκεντρωτική κατάσταση συμμετοχών για όλους τους μουσικούς.</p>
+                html += `<p class="text-xs text-slate-400 mb-2">Συγκεντρωτική κατάσταση παρουσιών</p>
                 <button onclick="exportAttendanceWorkbook()" class="mb-3 w-full bg-emerald-700 hover:bg-emerald-600 text-white py-2 rounded-lg text-xs font-semibold">Εξαγωγή παρουσιών (XLSX)</button>`;
 
                 const vapidOK = !!urlB64ToUint8Array(VAPID_PUBLIC_KEY);
@@ -2779,13 +2889,12 @@
             if (error) {
                 alert(`Σφάλμα αποθήκευσης παρουσίας:\n${error.message}\n\nΚωδικός: ${error.code || '—'}`);
             } else {
-                const scroller = document.scrollingElement || document.documentElement;
-                const scrollY = scroller.scrollTop || window.scrollY || 0;
+                const scroller = document.getElementById('content') || document.scrollingElement || document.documentElement;
+                const scrollY = scroller.scrollTop || 0;
                 const pastOpen = !!document.querySelector('#content details')?.open;
                 await renderEventsTab({ quiet: true, pastOpen });
                 const restore = () => {
                     scroller.scrollTop = scrollY;
-                    window.scrollTo(0, scrollY);
                 };
                 requestAnimationFrame(() => {
                     restore();
@@ -2814,6 +2923,11 @@
                 alert('Η εκδήλωση προστέθηκε!');
                 renderEventsTab();
             }
+        }
+
+        async function togglePushNotifications() {
+            if (pushSubscription) await disablePushNotifications();
+            else await enablePushNotifications();
         }
 
         async function enablePushNotifications() {
@@ -2857,7 +2971,7 @@
 
                 if (saveErr) throw saveErr;
 
-                showAppToast('Επιτυχής ενεργοποίηση ειδοποιήσεων.');
+                showAppToast('Επιτυχής ενεργοποίηση ειδοποιήσεων.', 'notify');
                 renderProfileTab();
             } catch (e) {
                 console.error(e);
@@ -3002,15 +3116,20 @@
             URL.revokeObjectURL(url);
         }
 
-        function showAppToast(message) {
+        function showAppToast(message, variant = 'success') {
             const existing = document.getElementById('app-toast');
             if (existing) existing.remove();
             const toast = document.createElement('div');
             toast.id = 'app-toast';
             toast.className = 'fixed inset-0 z-[10000] bg-black/50 flex items-center justify-center p-4';
+            const icon = variant === 'notify'
+                ? `<div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400">
+                    <svg aria-hidden="true" class="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10 19a2 2 0 0 0 4 0"></path><path d="m9 12 2 2 4-4"></path></svg>
+                   </div>`
+                : `<div class="text-3xl mb-2">✅</div>`;
             toast.innerHTML = `
                 <div class="bg-slate-800 border border-emerald-700/60 rounded-2xl p-5 w-full max-w-sm text-center">
-                    <div class="text-3xl mb-2">✅</div>
+                    ${icon}
                     <p class="text-sm text-slate-100 mb-4">${escapeHtml(message)}</p>
                     <button class="w-full py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold" onclick="document.getElementById('app-toast')?.remove()">Κλείσιμο</button>
                 </div>`;
@@ -3068,37 +3187,22 @@
 
             let pushSection = '';
             if (pushSupported) {
-                if (pushActive) {
-                    pushSection = `
-                        <div class="bg-emerald-900/30 border border-emerald-700/50 rounded-xl p-4 mb-4">
-                            <div class="flex items-start justify-between mb-1">
-                                <div>
-                                    <h4 class="text-sm font-bold text-emerald-300">🔔 Ειδοποιήσεις Ενεργές</h4>
-                                    <p class="text-[11px] text-emerald-400/80 mt-0.5">Θα λαμβάνετε ειδοποιήσεις για νέο πρόγραμμα, ανακοινώσεις & αλλαγές.</p>
-                                </div>
-                                <span class="bg-emerald-600 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">ON</span>
+                pushSection = `
+                    <div class="${pushActive ? 'bg-emerald-900/30 border-emerald-700/50' : 'bg-slate-800/60 border-slate-700'} border rounded-xl p-4 mb-4">
+                        <div class="flex items-start justify-between gap-3 mb-1">
+                            <div>
+                                <h4 class="text-sm font-bold ${pushActive ? 'text-emerald-300' : 'text-indigo-300'}">${pushActive ? '🔔 Ειδοποιήσεις Ενεργές' : '🔔 Push Ειδοποιήσεις'}</h4>
+                                <p class="text-[11px] ${pushActive ? 'text-emerald-400/80' : 'text-slate-400'} mt-0.5">${pushActive ? 'Θα λαμβάνετε ειδοποιήσεις της εφαρμογής και ανακοινώσεις του μαέστρου.' : 'Ενεργοποιήστε για να λαμβάνετε άμεσες ειδοποιήσεις της εφαρμογής και ανακοινώσεις του μαέστρου.'}</p>
                             </div>
-                            <button onclick="disablePushNotifications()" class="mt-2 w-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-red-300 py-2 rounded-lg text-xs font-semibold transition">Απενεργοποίηση Ειδοποιήσεων</button>
+                            <button type="button" class="push-switch ${pushActive ? 'on' : ''}" role="switch" aria-checked="${pushActive ? 'true' : 'false'}" aria-label="Ειδοποιήσεις" onclick="togglePushNotifications()"></button>
                         </div>
-                    `;
-                } else {
-                    pushSection = `
-                        <div class="bg-slate-800/60 border border-slate-700 rounded-xl p-4 mb-4">
-                            <div class="flex items-start justify-between mb-1">
-                                <div>
-                                    <h4 class="text-sm font-bold text-indigo-300">🔔 Push Ειδοποιήσεις</h4>
-                                    <p class="text-[11px] text-slate-400 mt-0.5">Ενεργοποιήστε για να λαμβάνετε άμεσες ειδοποιήσεις για νέο πρόγραμμα, ανακοινώσεις & αλλαγές.</p>
-                                </div>
-                            </div>
-                            <button onclick="enablePushNotifications()" class="mt-2 w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-lg text-xs font-semibold transition">✦ Ενεργοποίηση Ειδοποιήσεων</button>
-                        </div>
-                    `;
-                }
+                    </div>
+                `;
             } else {
                 pushSection = `
                     <div class="bg-slate-800/60 border border-slate-700 rounded-xl p-4 mb-4">
                         <h4 class="text-sm font-bold text-indigo-300">🔔 Push Ειδοποιήσεις</h4>
-                        <p class="text-[11px] text-slate-400 mt-1">Δεν υποστηρίζονται σε αυτή τη συσκευή. Στο iPhone/iPad χρειάζεται iOS 16.4 ή νεότερο, και η εφαρμογή πρέπει να είναι στην Αρχική οθόνη. Οι ανακοινώσεις εξακολουθούν να φαίνονται μέσα στην εφαρμογή.</p>
+                        <p class="text-[11px] text-slate-400 mt-1">${pushUnsupportedMessage()}</p>
                     </div>
                 `;
             }
