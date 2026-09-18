@@ -159,7 +159,7 @@
         }
         .viewer-float {
             position: absolute;
-            z-index: 2;
+            z-index: 30;
             background: rgba(15, 23, 42, 0.7);
             border: 1px solid rgba(71, 85, 105, 0.85);
             box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
@@ -295,7 +295,7 @@
 
     <!-- PDF VIEWER & ANNOTATION MODAL CONTAINER -->
     <div id="pdf-viewer-container" class="hidden fixed inset-0 bg-slate-950/95 z-50 flex flex-col p-0 max-w-none">
-        <button onclick="closePdfViewer()" aria-label="Κλείσιμο παρτιτούρας" class="viewer-chrome viewer-float left-3 text-slate-200 text-lg w-10 h-10 rounded-full">×</button>
+        <button type="button" onclick="closePdfViewer()" aria-label="Κλείσιμο παρτιτούρας" class="viewer-chrome viewer-float left-3 text-slate-200 text-lg w-10 h-10 rounded-full">×</button>
         <div id="page-indicator" class="viewer-chrome viewer-float page-indicator right-3 px-3 py-1.5 rounded-full">
             <span id="page-num-display" class="text-indigo-300 font-medium min-w-[56px] text-center text-xs">1 / 1</span>
         </div>
@@ -529,6 +529,7 @@
         let annotationRedoHistory = [];
         let annotationsDirty = false;
         let viewerHistoryActive = false;
+        let pdfViewerClosing = false;
         let currentTool = 'hand';
         const annotationSettings = {
             pen: { color: '#111827', width: 3.5 },
@@ -622,7 +623,12 @@
             setViewportMeta(!!pdfOpen);
         }
 
+        function isAndroidDevice() {
+            return /Android/i.test(navigator.userAgent);
+        }
+
         async function enterPdfFullscreen() {
+            if (isAndroidDevice()) return;
             const el = document.getElementById('pdf-viewer-container');
             if (!el) return;
             try {
@@ -1715,18 +1721,19 @@
             return new Promise((resolve) => {
                 const existing = document.getElementById('annotation-exit-dialog');
                 if (existing) existing.remove();
+                const host = document.getElementById('pdf-viewer-container') || document.body;
                 const dialog = document.createElement('div');
                 dialog.id = 'annotation-exit-dialog';
-                dialog.className = 'fixed inset-0 z-[10000] bg-black/60 flex items-center justify-center p-4';
+                dialog.className = 'absolute inset-0 z-[10000] bg-black/60 flex items-center justify-center p-4';
                 dialog.innerHTML = `
                     <div class="bg-slate-800 border border-slate-600 rounded-2xl p-4 w-full max-w-sm">
                         <p class="text-sm text-slate-100 mb-4">Έχετε μη αποθηκευμένες σημειώσεις. Θέλετε να τις αποθηκεύσετε πριν κλείσετε την παρτιτούρα;</p>
                         <div class="grid grid-cols-2 gap-2">
-                            <button id="ann-exit-no" class="py-2.5 rounded-lg bg-slate-700 text-white text-sm font-semibold">Όχι</button>
-                            <button id="ann-exit-yes" class="py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold">Ναι</button>
+                            <button type="button" id="ann-exit-no" class="py-2.5 rounded-lg bg-slate-700 text-white text-sm font-semibold">Όχι</button>
+                            <button type="button" id="ann-exit-yes" class="py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold">Ναι</button>
                         </div>
                     </div>`;
-                document.body.appendChild(dialog);
+                host.appendChild(dialog);
                 dialog.querySelector('#ann-exit-no').onclick = () => { dialog.remove(); resolve(false); };
                 dialog.querySelector('#ann-exit-yes').onclick = () => { dialog.remove(); resolve(true); };
             });
@@ -1747,7 +1754,7 @@
             document.getElementById('pdf-viewer-container').classList.remove('reader-mode');
             updateViewerToggleIcon(false);
             setViewportMeta(true);
-            enterPdfFullscreen();
+            if (!isAndroidDevice()) enterPdfFullscreen();
             
             pdfCanvas = document.getElementById('pdf-canvas');
             pdfCtx = pdfCanvas.getContext('2d');
@@ -1775,35 +1782,39 @@
         }
 
         async function closePdfViewer(fromHistory = false) {
-            if (!fromHistory && viewerHistoryActive) {
+            const viewer = document.getElementById('pdf-viewer-container');
+            if (!viewer || viewer.classList.contains('hidden') || pdfViewerClosing) return;
+            pdfViewerClosing = true;
+            try {
                 if (annotationsDirty) {
                     const shouldSave = await confirmDiscardAnnotations();
                     if (shouldSave) persistAnnotations();
                     else annotationsDirty = false;
                 }
-                viewerHistoryActive = false;
-                history.back();
-                closePdfViewer(true);
-                return;
+                if (!fromHistory && viewerHistoryActive) {
+                    viewerHistoryActive = false;
+                    history.back();
+                } else {
+                    viewerHistoryActive = false;
+                }
+                document.getElementById('annotation-exit-dialog')?.remove();
+                await releasePdfWakeLock();
+                await exitPdfFullscreen();
+                setViewportMeta(false);
+                viewer.classList.add('hidden');
+                pdfDoc = null;
+                pageNum = 1;
+                activePieceId = null;
+                pinchStartDistance = null;
+                pinchStartZoom = null;
+                pinchStartMidpoint = null;
+                panX = 0;
+                panY = 0;
+                lastScoreTapAt = 0;
+                annotationsDirty = false;
+            } finally {
+                pdfViewerClosing = false;
             }
-            if (annotationsDirty) {
-                const shouldSave = await confirmDiscardAnnotations();
-                if (shouldSave) persistAnnotations();
-            }
-            await releasePdfWakeLock();
-            await exitPdfFullscreen();
-            setViewportMeta(false);
-            document.getElementById('pdf-viewer-container').classList.add('hidden');
-            pdfDoc = null;
-            pageNum = 1;
-            activePieceId = null;
-            pinchStartDistance = null;
-            pinchStartZoom = null;
-            pinchStartMidpoint = null;
-            panX = 0;
-            panY = 0;
-            lastScoreTapAt = 0;
-            annotationsDirty = false;
         }
 
         async function renderPage(num) {
@@ -2376,7 +2387,7 @@
             annotationRedoHistory = [];
             clearDrawingCanvas();
             delete pageAnnotations[pageNum];
-            annotationsDirty = true;
+            persistAnnotations({ skipCurrentPage: true });
         }
 
         function clearDrawingCanvas() {
@@ -2421,17 +2432,34 @@
             annotationsDirty = true;
         }
 
-        function persistAnnotations() {
-            savePageToMemory();
+        function persistAnnotations(options = {}) {
+            if (!options.skipCurrentPage) savePageToMemory();
             const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
             const storageKey = `annotations_${userEmail}_piece_${activePieceId}`;
-            localStorage.setItem(storageKey, JSON.stringify(pageAnnotations));
+            const remaining = Object.fromEntries(
+                Object.entries(pageAnnotations).filter(([, value]) => value && (value.drawing || value.highlighting || typeof value === 'string'))
+            );
+            if (Object.keys(remaining).length === 0) localStorage.removeItem(storageKey);
+            else localStorage.setItem(storageKey, JSON.stringify(remaining));
             annotationsDirty = false;
         }
 
         function saveAnnotations() {
             persistAnnotations();
-            alert('Οι σημειώσεις αποθηκεύτηκαν επιτυχώς στη συσκευή σας!');
+            showViewerNotice('Οι σημειώσεις αποθηκεύτηκαν στη συσκευή σας.');
+        }
+
+        function showViewerNotice(message) {
+            const viewer = document.getElementById('pdf-viewer-container');
+            if (!viewer) return;
+            viewer.querySelector('#viewer-notice')?.remove();
+            const notice = document.createElement('div');
+            notice.id = 'viewer-notice';
+            notice.className = 'absolute left-1/2 z-[60] -translate-x-1/2 rounded-full bg-slate-800/95 px-4 py-2 text-xs text-slate-100 shadow-lg';
+            notice.style.bottom = 'calc(max(12px, env(safe-area-inset-bottom)) + 64px)';
+            notice.textContent = message;
+            viewer.appendChild(notice);
+            setTimeout(() => notice.remove(), 1800);
         }
 
         function loadSavedAnnotations() {
