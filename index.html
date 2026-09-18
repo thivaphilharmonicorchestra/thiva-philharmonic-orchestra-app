@@ -605,39 +605,44 @@
                 .eq('id', currentUser.id)
                 .maybeSingle();
 
-            const nameMissing = !(data?.first_name || '').trim() && !(data?.last_name || '').trim();
-            if ((!data || nameMissing || !['admin', 'conductor', 'musician'].includes(data.role)) && currentUser.email) {
+            const candidates = [];
+            if (data) candidates.push(data);
+            if (currentUser.email) {
                 const { data: byEmail } = await supabaseClient
                     .from('profiles')
                     .select('*')
                     .ilike('email', currentUser.email);
-                const named = (byEmail || []).sort((a, b) => {
-                    const rank = (p) => (p.role === 'admin' ? 3 : p.role === 'conductor' ? 2 : ((p.first_name || '').trim() ? 1 : 0));
-                    return rank(b) - rank(a);
-                })[0];
-                if (named) data = { ...named, id: data?.id || named.id };
+                (byEmail || []).forEach(row => {
+                    if (!candidates.some(c => c.id === row.id)) candidates.push(row);
+                });
             }
+
+            const candidateIds = [...new Set([
+                ...candidates.map(row => row.id),
+                currentUser.id
+            ].filter(Boolean))];
 
             if (data) {
                 currentProfile = data;
+            } else if (candidates[0]) {
+                currentProfile = candidates[0];
             } else {
                 currentProfile = { email: currentUser.email, role: 'musician', instrument: 'Μη ορισμένο' };
             }
 
-            if (currentProfile?.id || currentUser?.id) {
-                const userIds = [...new Set([currentProfile?.id, currentUser?.id].filter(Boolean))];
+            if (candidateIds.length) {
                 let assignments = [];
                 const withNames = await supabaseClient
                     .from('user_instruments')
-                    .select('instrument_id, part_position, concert_set, instruments(name, is_section, is_percussion)')
-                    .in('user_id', userIds);
+                    .select('user_id, instrument_id, part_position, concert_set, instruments(name, is_section, is_percussion)')
+                    .in('user_id', candidateIds);
                 if (!withNames.error) {
                     assignments = withNames.data || [];
                 } else {
                     const plain = await supabaseClient
                         .from('user_instruments')
-                        .select('instrument_id, part_position, concert_set')
-                        .in('user_id', userIds);
+                        .select('user_id, instrument_id, part_position, concert_set')
+                        .in('user_id', candidateIds);
                     assignments = plain.error ? [] : (plain.data || []);
                     const ids = [...new Set(assignments.map(row => row.instrument_id).filter(Boolean))];
                     if (ids.length) {
@@ -651,7 +656,20 @@
                         }));
                     }
                 }
-                currentProfile.assignments = assignments;
+                const assignedIds = new Set(assignments.map(row => row.user_id).filter(Boolean));
+                const ranked = candidates.slice().sort((a, b) => {
+                    const score = (p) =>
+                        (assignedIds.has(p.id) ? 8 : 0)
+                        + (p.role === 'admin' ? 4 : p.role === 'conductor' ? 3 : 0)
+                        + (((p.first_name || '').trim() || (p.last_name || '').trim()) ? 2 : 0)
+                        + (p.id === currentUser.id ? 1 : 0);
+                    return score(b) - score(a);
+                });
+                if (ranked[0]) currentProfile = ranked[0];
+                const profileId = currentProfile?.id;
+                currentProfile.assignments = profileId
+                    ? assignments.filter(row => !row.user_id || row.user_id === profileId)
+                    : assignments;
             } else {
                 currentProfile.assignments = [];
             }
@@ -707,6 +725,18 @@
             return rel.name || '';
         }
 
+        function instrumentUiName(name, isSection) {
+            const n = (name || '').trim();
+            if (isSection || n === 'Percussion (all)') return 'Percussion Section';
+            return n;
+        }
+
+        function relationIsSection(rel) {
+            if (!rel) return false;
+            const row = Array.isArray(rel) ? rel[0] : rel;
+            return row?.is_section === true || row?.name === 'Percussion (all)';
+        }
+
         function musicPartLabel(item) {
             return relationName(item?.musical_parts?.instruments) === 'Percussion (all)'
                 ? 'Percussion'
@@ -726,7 +756,7 @@
                 return legacy ? [legacy] : [];
             }
             return rows.map(row => {
-                const name = relationName(row.instruments) || 'Όργανο';
+                const name = instrumentUiName(relationName(row.instruments), relationIsSection(row.instruments)) || 'Όργανο';
                 let label = row.part_position ? `${name} ${row.part_position}` : name;
                 if (row.concert_set) label += ` · ${row.concert_set}`;
                 return label;
@@ -1138,7 +1168,7 @@
                     <div class="grid grid-cols-2 gap-2">
                         ${canFilterMusicInstruments() ? `
                         <select id="mf-instrument" class="p-2 bg-slate-900 border border-slate-700 rounded text-xs text-white">
-                            <option value="all">${hasPercussionAllAssignment() && !isPrivilegedRole() ? 'Percussion (all)' : `Όλα τα μέρη (${partNames.length})`}</option>
+                            <option value="all">${hasPercussionAllAssignment() && !isPrivilegedRole() ? 'Percussion Section' : `Όλα τα μέρη (${partNames.length})`}</option>
                             ${partNames.filter(ins => !(hasPercussionAllAssignment() && !isPrivilegedRole() && ins === 'Percussion (all)')).map(ins => `<option value="${escapeHtml(ins)}" ${musicFilter.instrument === ins ? 'selected':''}>${escapeHtml(ins)}</option>`).join('')}
                         </select>
                         ` : '<div></div>'}
@@ -1213,7 +1243,12 @@
             if (count) count.textContent = `${displayed.length} από ${poolCount} παρτιτούρες`;
 
             if (!displayed.length) {
-                results.innerHTML = `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">${musicLibraryCache.length === 0 ? 'Δεν υπάρχουν διαθέσιμες παρτιτούρες ακόμα.' : 'Καμία παρτιτούρα δεν ταιριάζει με τα φίλτρα σας.'}</div>`;
+                const emptyMessage = musicLibraryCache.length === 0
+                    ? (assignmentLabels().length
+                        ? 'Δεν υπάρχουν διαθέσιμες παρτιτούρες για την ανάθεσή σας ακόμα.'
+                        : 'Δεν έχει οριστεί όργανο στο προφίλ σας.')
+                    : 'Καμία παρτιτούρα δεν ταιριάζει με τα φίλτρα σας.';
+                results.innerHTML = `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">${emptyMessage}</div>`;
                 return;
             }
 
@@ -2925,14 +2960,14 @@
                 return `<option value="${p.id}">${escapeHtml(name)} (${escapeHtml(p.email || '')})</option>`;
             }).join('');
             const instrumentOptions = (window.adminAssignmentInstruments || []).map(ins =>
-                `<option value="${ins.id}" data-max="${ins.max_regular_parts}">${escapeHtml(ins.name)}${ins.is_section ? ' — ενότητα' : ''}</option>`
+                `<option value="${ins.id}" data-max="${ins.max_regular_parts}">${escapeHtml(instrumentUiName(ins.name, ins.is_section))}</option>`
             ).join('');
             const listHtml = (people || []).map(p => {
                 const assigns = byUser[p.id] || [];
                 if (!assigns.length) return '';
                 const name = `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.email;
                 const items = assigns.map(row => {
-                    const insName = relationName(row.instruments) || 'Όργανο';
+                    const insName = instrumentUiName(relationName(row.instruments), relationIsSection(row.instruments)) || 'Όργανο';
                     const part = row.part_position ? ` ${row.part_position}` : '';
                     const set = row.concert_set ? ` · ${row.concert_set}` : '';
                     return `<div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-700/70 last:border-0">
