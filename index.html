@@ -1161,13 +1161,16 @@
         }
 
         function musicPartLabel(item) {
-            return relationName(item?.musical_parts?.instruments) === 'Percussion (all)'
-                ? 'Percussion'
-                : (relationName(item?.musical_parts?.instruments)
-                    || item?.musical_parts?.display_name
-                    || item?.instrument_part
-                    || item?.concert_set
-                    || 'Γενικό');
+            const part = Array.isArray(item?.musical_parts) ? item.musical_parts[0] : item?.musical_parts;
+            const instrumentName = relationName(part?.instruments);
+            if (instrumentName === 'Percussion (all)' || relationIsSection(part?.instruments)) {
+                return 'Percussion';
+            }
+            const base = instrumentName || item?.instrument_part || '';
+            if (part?.is_beginner && base) return `${base} (beginner)`;
+            if (part?.part_position && base) return `${base} ${part.part_position}`;
+            if (part?.display_name) return part.display_name;
+            return base || item?.concert_set || 'Γενικό';
         }
 
         function assignmentLabels() {
