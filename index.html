@@ -3112,15 +3112,14 @@
 
             const monthNames = ["Ιανουάριος", "Φεβρουάριος", "Μάρτιος", "Απρίλιος", "Μάιος", "Ιούνιος", "Ιούλιος", "Αύγουστος", "Σεπτέμβριος", "Οκτώβριος", "Νοέμβριος", "Δεκέμβριος"];
             
-            const eventDatesSet = new Set();
-            if (events) {
-                events.forEach(ev => {
-                    if (ev.date) {
-                        const dateStr = ev.date.split('T')[0];
-                        eventDatesSet.add(dateStr);
-                    }
-                });
-            }
+            const officialDates = new Set();
+            const rehearsalDates = new Set();
+            (events || []).forEach(ev => {
+                if (!ev.date) return;
+                const dateStr = String(ev.date).split('T')[0];
+                if (isRehearsalEvent(ev)) rehearsalDates.add(dateStr);
+                else officialDates.add(dateStr);
+            });
 
             const today = new Date();
             const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
@@ -3146,12 +3145,15 @@
                 const dayStr = String(day).padStart(2, '0');
                 const monthStr = String(month + 1).padStart(2, '0');
                 const fullDateStr = `${year}-${monthStr}-${dayStr}`;
-                const hasEvent = eventDatesSet.has(fullDateStr);
+                const hasOfficial = officialDates.has(fullDateStr);
+                const hasRehearsal = rehearsalDates.has(fullDateStr);
                 const isToday = fullDateStr === todayStr;
 
                 let btnClass = "py-2 rounded transition font-medium text-[11px] ";
-                if (hasEvent) {
-                    btnClass += "bg-indigo-600 text-white font-bold shadow hover:bg-indigo-500 cursor-pointer";
+                if (hasOfficial) {
+                    btnClass += "bg-indigo-600 text-white font-bold hover:bg-indigo-500 cursor-pointer";
+                } else if (hasRehearsal) {
+                    btnClass += "bg-teal-600 text-white font-bold hover:bg-teal-500 cursor-pointer";
                 } else if (isToday) {
                     btnClass += "bg-slate-700 text-amber-300 border border-amber-400/50";
                 } else {
@@ -3165,7 +3167,14 @@
                 html += `<button onclick="filterByDate('${fullDateStr}')" class="${btnClass}">${day}</button>`;
             }
 
-            html += `</div></div>`;
+            html += `
+                    </div>
+                    <div class="flex justify-center gap-4 mt-3 text-[10px] text-slate-400">
+                        <span class="inline-flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-full bg-indigo-600"></span> Εκδήλωση</span>
+                        <span class="inline-flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-full bg-teal-600"></span> Πρόβα</span>
+                    </div>
+                </div>
+            `;
             return html;
         }
 
