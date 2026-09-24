@@ -928,6 +928,8 @@
             registerServiceWorker();
             initPushSupport();
             if (window.location.hash === '#notifications') activeTab = 'notifications';
+            if (window.location.hash === '#events') activeTab = 'events';
+            if (window.location.hash === '#attendance') activeTab = 'attendance';
 
             const cbInfo = authCallbackParams();
             const callback = ['invite', 'recovery', 'signup'].includes(cbInfo.type);
@@ -2750,6 +2752,7 @@
                         locationHtml = `<a href="${safeExternalUrl(ev.location)}" rel="noopener noreferrer" target="_blank" class="text-indigo-400 hover:underline">Χάρτης</a>`;
                     }
                     const typeBadge = ev.event_type ? `<span class="shrink-0 max-w-[42%] text-right bg-slate-700 text-indigo-300 px-2 py-0.5 rounded text-[10px] font-semibold whitespace-pre-line leading-tight">${escapeHtml(ev.event_type)}</span>` : '';
+                    const rsvpLocked = eventRsvpLocked(ev);
                     let goingBtnClass = "px-3 py-1.5 rounded text-xs font-semibold transition ";
                     let notGoingBtnClass = "px-3 py-1.5 rounded text-xs font-semibold transition ";
                     let statusLabel = '<span class="text-slate-400">Κατάσταση: <b class="text-slate-300">Χωρίς απάντηση</b></span>';
@@ -2765,6 +2768,17 @@
                         goingBtnClass += "bg-emerald-600 hover:bg-emerald-500 text-white";
                         notGoingBtnClass += "bg-red-600 hover:bg-red-500 text-white";
                     }
+                    const lockNote = rsvpLocked
+                        ? (isRehearsalEvent(ev)
+                            ? 'Η δήλωση παρουσίας έχει κλείσει.'
+                            : 'Η προθεσμία δήλωσης έληξε (3 ημέρες πριν την εκδήλωση).')
+                        : '';
+                    const rsvpButtons = rsvpLocked
+                        ? `<span class="text-[11px] text-slate-500">${lockNote}</span>`
+                        : `<div class="space-x-1.5 self-end sm:self-auto">
+                                    <button onclick="rsvp(${ev.id}, 'Going')" class="${goingBtnClass}">Θα είμαι εκεί</button>
+                                    <button onclick="rsvp(${ev.id}, 'Not Going')" class="${notGoingBtnClass}">Δεν μπορώ</button>
+                                </div>`;
                     return `
                         <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
                             <div class="flex justify-between items-start mb-1 gap-2">
@@ -2776,10 +2790,7 @@
                             ${ev.notes ? `<p class="text-xs bg-slate-900 p-2.5 rounded mb-3 text-slate-300 whitespace-pre-wrap">${escapeHtml(ev.notes)}</p>` : ''}
                             <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between border-t border-slate-700 pt-3 gap-2">
                                 <div class="text-xs">${statusLabel}</div>
-                                <div class="space-x-1.5 self-end sm:self-auto">
-                                    <button onclick="rsvp(${ev.id}, 'Going')" class="${goingBtnClass}">Θα είμαι εκεί</button>
-                                    <button onclick="rsvp(${ev.id}, 'Not Going')" class="${notGoingBtnClass}">Δεν μπορώ</button>
-                                </div>
+                                ${rsvpButtons}
                             </div>
                         </div>`;
                 }).join('');
@@ -2880,7 +2891,7 @@
                 } else {
                     const { data: profiles, error: profilesError } = await supabaseClient
                         .from('profiles')
-                        .select('email, first_name, last_name, instrument');
+                        .select('email, first_name, last_name, instrument, role');
                     if (profilesError) {
                         console.error('Αδυναμία φόρτωσης προφίλ για τις παρουσίες:', profilesError);
                     }
@@ -2892,7 +2903,7 @@
                     );
                     const { data: allAttendance, error: allAttError } = await supabaseClient
                         .from('event_responses')
-                        .select('status, excuse, user_email, event_id');
+                        .select('status, excuse, user_email, event_id, actual_attendance');
                     if (allAttError) {
                         html += `<div class="bg-red-900/40 border border-red-700/60 text-red-200 p-3 rounded-xl text-xs mb-3">Σφάλμα φόρτωσης παρουσιών: ${escapeHtml(allAttError.message || 'Άγνωστο σφάλμα')}</div>`;
                     }
@@ -2902,13 +2913,104 @@
                         responsesByEvent.get(row.event_id).push(row);
                     });
 
+                    const musicianProfiles = (profiles || []).filter(profile => {
+                        const role = String(profile.role || '').toLowerCase();
+                        return role !== 'admin' && role !== 'conductor';
+                    });
                     const renderAttendanceCard = (ev) => {
                         const eventResponses = responsesByEvent.get(ev.id) || [];
                         const goingList = eventResponses.filter(r => String(r.status).toLowerCase() === 'going');
                         const notGoingList = eventResponses.filter(r => String(r.status).toLowerCase() === 'not going');
+                        const answeredEmails = new Set(
+                            eventResponses
+                                .filter(r => String(r.status || '').trim())
+                                .map(r => String(r.user_email || '').trim().toLowerCase())
+                        );
+                        const pendingList = musicianProfiles
+                            .filter(p => !answeredEmails.has(String(p.email || '').trim().toLowerCase()))
+                            .sort((a, b) => `${a.last_name || ''} ${a.first_name || ''}`.localeCompare(`${b.last_name || ''} ${b.first_name || ''}`, 'el', { sensitivity: 'base' }));
                         const formattedDate = formatGreekDateOnly(ev.date);
                         const dateTimeDisplay = ev.time ? `${formattedDate}, ${escapeHtml(formatEventTime(ev.time))}` : `${formattedDate} (Ώρα αναμένεται)`;
                         const typeBadge = ev.event_type ? `<span class="shrink-0 max-w-[42%] text-right bg-slate-700 text-indigo-300 px-2 py-0.5 rounded text-[10px] font-semibold whitespace-pre-line leading-tight">${escapeHtml(ev.event_type)}</span>` : '';
+                        const rsvpLocked = eventRsvpLocked(ev);
+                        const eventOver = eventHasEnded(ev);
+                        const responseByEmail = new Map(
+                            eventResponses.map(r => [String(r.user_email || '').trim().toLowerCase(), r])
+                        );
+                        const rsvpLabel = (row) => {
+                            const st = String(row?.status || '').toLowerCase();
+                            if (st === 'going') return 'Θα είναι εκεί';
+                            if (st === 'not going') return 'Δεν μπορεί';
+                            return 'Χωρίς δήλωση';
+                        };
+                        const personName = (email, profile) => {
+                            const fullName = `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim();
+                            return fullName || email;
+                        };
+                        const staffRsvpBtns = (email, currentStatus) => {
+                            const encoded = encodeURIComponent(String(email || '').trim().toLowerCase());
+                            if (!rsvpLocked || eventOver) return '';
+                            return `<div class="mt-1 space-x-2">
+                                ${currentStatus !== 'Going' ? `<button type="button" onclick="staffSetRsvp(${ev.id}, '${encoded}', 'Going')" class="text-[10px] text-emerald-300 underline">Θα είναι</button>` : ''}
+                                ${currentStatus !== 'Not Going' ? `<button type="button" onclick="staffSetRsvp(${ev.id}, '${encoded}', 'Not Going')" class="text-[10px] text-red-300 underline">Δεν μπορεί</button>` : ''}
+                            </div>`;
+                        };
+                        const actualBtns = (email, actual) => {
+                            const encoded = encodeURIComponent(String(email || '').trim().toLowerCase());
+                            return `<div class="mt-1 space-x-2">
+                                ${actual !== 'present' ? `<button type="button" onclick="staffSetActual(${ev.id}, '${encoded}', 'present')" class="text-[10px] text-emerald-300 underline">Παρευρέθηκε</button>` : '<span class="text-[10px] text-emerald-400">Παρευρέθηκε</span>'}
+                                ${actual !== 'absent' ? `<button type="button" onclick="staffSetActual(${ev.id}, '${encoded}', 'absent')" class="text-[10px] text-red-300 underline">Απών</button>` : '<span class="text-[10px] text-red-400">Απών</span>'}
+                            </div>`;
+                        };
+                        const rsvpBoxes = `
+                                <div class="grid grid-cols-2 gap-2 mb-3 text-xs">
+                                    <div class="bg-slate-900 p-2.5 rounded border border-slate-700/60">
+                                        <span class="text-emerald-400 font-semibold block mb-1">✅ Δήλωσαν ότι θα πάνε (${goingList.length})</span>
+                                        ${goingList.length === 0 ? '<span class="text-slate-500 italic">Καμία δήλωση</span>' :
+                                          goingList.map(r => {
+                                            const profile = profilesByEmail.get(String(r.user_email || '').trim().toLowerCase());
+                                            const instrument = profile?.instrument ? ` (${profile.instrument})` : '';
+                                            return `<div class="text-slate-300 mb-1">• ${escapeHtml(personName(r.user_email, profile))}${escapeHtml(instrument)}${staffRsvpBtns(r.user_email, 'Going')}</div>`;
+                                          }).join('')}
+                                    </div>
+                                    <div class="bg-slate-900 p-2.5 rounded border border-slate-700/60">
+                                        <span class="text-red-400 font-semibold block mb-1">❌ Δήλωσαν απουσία (${notGoingList.length})</span>
+                                        ${notGoingList.length === 0 ? '<span class="text-slate-500 italic">Κανένας</span>' :
+                                          notGoingList.map(r => {
+                                            const profile = profilesByEmail.get(String(r.user_email || '').trim().toLowerCase());
+                                            const instrument = profile?.instrument ? ` (${profile.instrument})` : '';
+                                            return `<div class="text-slate-300 mb-1">• <b>${escapeHtml(personName(r.user_email, profile))}${escapeHtml(instrument)}</b><br><span class="text-[10px] text-slate-400 italic">"${escapeHtml(r.excuse || 'Χωρίς αιτιολογία')}"</span>${staffRsvpBtns(r.user_email, 'Not Going')}</div>`;
+                                          }).join('')}
+                                    </div>
+                                </div>
+                                <div class="bg-slate-900 p-2.5 rounded border border-slate-700/60 text-xs ${eventOver ? 'mb-3' : ''}">
+                                    <span class="text-slate-300 font-semibold block mb-1">Χωρίς δήλωση (${pendingList.length})</span>
+                                    ${pendingList.length === 0 ? '<span class="text-slate-500 italic">Κανείς</span>' :
+                                      pendingList.map(profile => {
+                                        const instrument = profile.instrument ? ` (${profile.instrument})` : '';
+                                        return `<div class="text-slate-300 mb-1">• ${escapeHtml(personName(profile.email, profile))}${escapeHtml(instrument)}${staffRsvpBtns(profile.email, null)}</div>`;
+                                      }).join('')}
+                                </div>`;
+                        const rollCall = eventOver ? `
+                                <div class="bg-slate-900 p-2.5 rounded border border-amber-800/50 text-xs">
+                                    <span class="text-amber-300 font-semibold block mb-1">Πραγματική παρουσία (πληρωμή)</span>
+                                    <p class="text-[10px] text-slate-400 mb-2">Η δήλωση μένει ως έχει. Εδώ σημειώνετε ποιος ήρθε τελικά.</p>
+                                    ${[...musicianProfiles].sort((a, b) => `${a.last_name || ''} ${a.first_name || ''}`.localeCompare(`${b.last_name || ''} ${b.first_name || ''}`, 'el', { sensitivity: 'base' })).map(profile => {
+                                        const email = String(profile.email || '').trim().toLowerCase();
+                                        const row = responseByEmail.get(email);
+                                        const instrument = profile.instrument ? ` (${profile.instrument})` : '';
+                                        return `<div class="border-t border-slate-800 py-1.5 first:border-0">
+                                            <div class="text-slate-200">${escapeHtml(personName(email, profile))}${escapeHtml(instrument)}</div>
+                                            <div class="text-[10px] text-slate-500">Δήλωση: ${escapeHtml(rsvpLabel(row))}</div>
+                                            ${actualBtns(email, row?.actual_attendance || null)}
+                                        </div>`;
+                                    }).join('')}
+                                </div>` : '';
+                        const lockHint = !eventOver && rsvpLocked
+                            ? (isRehearsalEvent(ev)
+                                ? '<p class="text-[11px] text-amber-300/90 mb-3">Η δήλωση των μουσικών έχει κλείσει.</p>'
+                                : '<p class="text-[11px] text-amber-300/90 mb-3">Η προθεσμία των μουσικών έληξε (3 ημέρες πριν). Μπορείτε ακόμα να καταχωρήσετε δήλωση αν σας πήραν τηλέφωνο.</p>')
+                            : '';
                         return `
                             <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
                                 <div class="flex justify-between items-start mb-1">
@@ -2916,28 +3018,9 @@
                                     ${typeBadge}
                                 </div>
                                 <p class="text-xs text-indigo-300 mb-3">📅 ${dateTimeDisplay}</p>
-                                <div class="grid grid-cols-2 gap-2 mb-3 text-xs">
-                                    <div class="bg-slate-900 p-2.5 rounded border border-slate-700/60">
-                                        <span class="text-emerald-400 font-semibold block mb-1">✅ Θα πάνε (${goingList.length})</span>
-                                        ${goingList.length === 0 ? '<span class="text-slate-500 italic">Καμία δήλωση</span>' :
-                                          goingList.map(r => {
-                                            const profile = profilesByEmail.get(String(r.user_email || '').trim().toLowerCase());
-                                            const fullName = `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || r.user_email;
-                                            const instrument = profile?.instrument ? ` (${profile.instrument})` : '';
-                                            return `<div class="text-slate-300 truncate">• ${escapeHtml(fullName)}${escapeHtml(instrument)}</div>`;
-                                          }).join('')}
-                                    </div>
-                                    <div class="bg-slate-900 p-2.5 rounded border border-slate-700/60">
-                                        <span class="text-red-400 font-semibold block mb-1">❌ Απόντες (${notGoingList.length})</span>
-                                        ${notGoingList.length === 0 ? '<span class="text-slate-500 italic">Κανένας</span>' :
-                                          notGoingList.map(r => {
-                                            const profile = profilesByEmail.get(String(r.user_email || '').trim().toLowerCase());
-                                            const fullName = `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || r.user_email;
-                                            const instrument = profile?.instrument ? ` (${profile.instrument})` : '';
-                                            return `<div class="text-slate-300 mb-1">• <b>${escapeHtml(fullName)}${escapeHtml(instrument)}</b><br><span class="text-[10px] text-slate-400 italic">"${escapeHtml(r.excuse || 'Χωρίς αιτιολογία')}"</span></div>`;
-                                          }).join('')}
-                                    </div>
-                                </div>
+                                ${lockHint}
+                                ${rsvpBoxes}
+                                ${rollCall}
                             </div>
                         `;
                     };
@@ -2961,10 +3044,23 @@
                     console.error('Αδυναμία φόρτωσης προσωπικών απαντήσεων:', myResponsesError);
                 }
                 
-                const totalEventsCount = events?.length || 0;
-                const attendedCount = myResponses?.filter(r => String(r.status).toLowerCase() === 'going').length || 0;
-                const absentCount = myResponses?.filter(r => String(r.status).toLowerCase() === 'not going').length || 0;
-                const pendingCount = totalEventsCount - (attendedCount + absentCount);
+                const responseByEvent = new Map((myResponses || []).map(r => [r.event_id, r]));
+                let attendedCount = 0;
+                let absentCount = 0;
+                let pendingCount = 0;
+                (events || []).forEach(ev => {
+                    const r = responseByEvent.get(ev.id);
+                    if (eventHasEnded(ev)) {
+                        if (r?.actual_attendance === 'present') attendedCount++;
+                        else if (r?.actual_attendance === 'absent') absentCount++;
+                        else pendingCount++;
+                    } else {
+                        const st = String(r?.status || '').toLowerCase();
+                        if (st === 'going') attendedCount++;
+                        else if (st === 'not going') absentCount++;
+                        else pendingCount++;
+                    }
+                });
 
                 html += `
                     <div class="grid grid-cols-3 gap-2 mb-4 text-center">
@@ -3088,18 +3184,57 @@
         }
 
         function isRehearsalEvent(ev) {
-            const folded = String(ev?.event_name || '')
+            const folded = `${ev?.event_name || ''} ${ev?.event_type || ''}`
                 .normalize('NFD')
                 .replace(/\p{M}/gu, '')
                 .toLowerCase();
             return folded.includes('προβα');
         }
 
+        function athensNowParts() {
+            const fmt = new Intl.DateTimeFormat('en-GB', {
+                timeZone: 'Europe/Athens',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hourCycle: 'h23'
+            });
+            const map = Object.fromEntries(fmt.formatToParts(new Date()).map(p => [p.type, p.value]));
+            return {
+                date: `${map.year}-${map.month}-${map.day}`,
+                hm: `${map.hour}:${map.minute}`
+            };
+        }
+
         function isPastEvent(ev) {
             if (!ev?.date) return false;
-            const today = new Date();
-            const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+            const todayStr = athensNowParts().date;
             return String(ev.date).split('T')[0] < todayStr;
+        }
+
+        function daysUntilEvent(ev) {
+            if (!ev?.date) return 0;
+            const today = athensNowParts().date;
+            const eventDate = String(ev.date).split('T')[0];
+            return Math.round((Date.parse(`${eventDate}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000);
+        }
+
+        function eventHasEnded(ev) {
+            if (!ev?.date) return true;
+            const now = athensNowParts();
+            const eventDate = String(ev.date).split('T')[0];
+            if (eventDate < now.date) return true;
+            if (eventDate > now.date) return false;
+            const eventTime = ev.time ? String(ev.time).slice(0, 5) : '23:59';
+            return eventTime <= now.hm;
+        }
+
+        function eventRsvpLocked(ev) {
+            if (!ev?.date) return true;
+            if (isRehearsalEvent(ev)) return eventHasEnded(ev);
+            return daysUntilEvent(ev) <= 3;
         }
 
         function renderCalendarGrid(events) {
@@ -3184,6 +3319,20 @@
         }
 
         async function rsvp(eventId, status) {
+            let ev = (eventsTabCache.events || []).find(e => Number(e.id) === Number(eventId));
+            if (!ev) {
+                const { data } = await supabaseClient.from('band_events').select('id, date, time, event_name, event_type').eq('id', eventId).maybeSingle();
+                ev = data;
+            }
+            if (eventRsvpLocked(ev)) {
+                showAppNotice(
+                    isRehearsalEvent(ev)
+                        ? 'Η δήλωση παρουσίας για αυτή την πρόβα έχει κλείσει.'
+                        : 'Η προθεσμία δήλωσης έληξε 3 ημέρες πριν την εκδήλωση.'
+                );
+                return;
+            }
+
             let excuse = null;
 
             if (status === 'Not Going') {
@@ -3227,6 +3376,76 @@
                 });
                 setTimeout(restore, 50);
             }
+        }
+
+        async function staffSetRsvp(eventId, encodedEmail, status) {
+            if (!isPrivilegedRole()) {
+                showAppNotice('Μόνο ο διαχειριστής και ο μαέστρος μπορούν να καταχωρήσουν δήλωση.');
+                return;
+            }
+            const userEmail = decodeURIComponent(encodedEmail || '').trim().toLowerCase();
+            if (!userEmail) return;
+            let excuse = '';
+            if (status === 'Not Going') {
+                excuse = prompt('Αιτιολογία απουσίας:', 'Δήλωση μέσω μαέστρου/διαχειριστή');
+                if (excuse === null) return;
+                if (!excuse.trim()) {
+                    showAppNotice('Η αιτιολογία είναι υποχρεωτική για απουσία.');
+                    return;
+                }
+            }
+            const { data: existing } = await supabaseClient
+                .from('event_responses')
+                .select('actual_attendance, actual_note, actual_set_at')
+                .eq('event_id', eventId)
+                .eq('user_email', userEmail)
+                .maybeSingle();
+            const { error } = await supabaseClient
+                .from('event_responses')
+                .upsert(
+                    [{
+                        event_id: eventId,
+                        user_email: userEmail,
+                        status,
+                        excuse,
+                        actual_attendance: existing?.actual_attendance ?? null,
+                        actual_note: existing?.actual_note ?? null,
+                        actual_set_at: existing?.actual_set_at ?? null
+                    }],
+                    { onConflict: 'event_id,user_email' }
+                );
+            if (error) showAppNotice(`Σφάλμα δήλωσης:\n${error.message}`);
+            else renderAttendanceTab();
+        }
+
+        async function staffSetActual(eventId, encodedEmail, actual) {
+            if (!isPrivilegedRole()) {
+                showAppNotice('Μόνο ο διαχειριστής και ο μαέστρος μπορούν να καταχωρήσουν παρουσία.');
+                return;
+            }
+            const userEmail = decodeURIComponent(encodedEmail || '').trim().toLowerCase();
+            if (!userEmail) return;
+            const { data: existing } = await supabaseClient
+                .from('event_responses')
+                .select('status, excuse')
+                .eq('event_id', eventId)
+                .eq('user_email', userEmail)
+                .maybeSingle();
+            const { error } = await supabaseClient
+                .from('event_responses')
+                .upsert(
+                    [{
+                        event_id: eventId,
+                        user_email: userEmail,
+                        status: existing?.status || '',
+                        excuse: existing?.excuse || '',
+                        actual_attendance: actual,
+                        actual_set_at: new Date().toISOString()
+                    }],
+                    { onConflict: 'event_id,user_email' }
+                );
+            if (error) showAppNotice(`Σφάλμα παρουσίας:\n${error.message}`);
+            else renderAttendanceTab();
         }
 
         async function addEvent() {
@@ -3450,12 +3669,13 @@
             const [{ data: events }, { data: profiles }, { data: responses }] = await Promise.all([
                 supabaseClient.from('band_events').select('id, event_name, event_type, date, time'),
                 supabaseClient.from('profiles').select('email, first_name, last_name, instrument, role'),
-                supabaseClient.from('event_responses').select('event_id, user_email, status, excuse')
+                supabaseClient.from('event_responses').select('event_id, user_email, status, excuse, actual_attendance')
             ]);
-            const rows = [['Εκδήλωση', 'Ημερομηνία', 'Ώρα', 'Μουσικός', 'Όργανο', 'Κατάσταση', 'Αιτιολογία']];
+            const rows = [['Εκδήλωση', 'Ημερομηνία', 'Ώρα', 'Μουσικός', 'Όργανο', 'Δήλωση', 'Αιτιολογία', 'Πραγματική παρουσία']];
             (events || []).forEach(ev => {
                 (responses || []).filter(r => r.event_id === ev.id).forEach(r => {
                     const profile = (profiles || []).find(p => String(p.email || '').trim().toLowerCase() === String(r.user_email || '').trim().toLowerCase());
+                    const actual = r.actual_attendance === 'present' ? 'Παρευρέθηκε' : (r.actual_attendance === 'absent' ? 'Απών' : '');
                     rows.push([
                         ev.event_name || '',
                         ev.date ? String(ev.date).split('T')[0] : '',
@@ -3463,7 +3683,8 @@
                         `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || r.user_email,
                         profile?.instrument || '',
                         r.status || '',
-                        r.excuse || ''
+                        r.excuse || '',
+                        actual
                     ]);
                 });
             });
