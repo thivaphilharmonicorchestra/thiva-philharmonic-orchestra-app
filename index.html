@@ -2913,10 +2913,7 @@
                         responsesByEvent.get(row.event_id).push(row);
                     });
 
-                    const musicianProfiles = (profiles || []).filter(profile => {
-                        const role = String(profile.role || '').toLowerCase();
-                        return role !== 'admin' && role !== 'conductor';
-                    });
+                    const musicianProfiles = (profiles || []).filter(profile => String(profile.email || '').trim());
                     const renderAttendanceCard = (ev) => {
                         const eventResponses = responsesByEvent.get(ev.id) || [];
                         const goingList = eventResponses.filter(r => String(r.status).toLowerCase() === 'going');
@@ -3724,10 +3721,7 @@
             const endedEvents = (events || []).filter(ev => eventHasEnded(ev));
             sortEventsChronologically(endedEvents);
 
-            const musicians = (profiles || []).filter(p => {
-                const role = String(p.role || '').toLowerCase();
-                return role !== 'admin' && role !== 'conductor';
-            }).sort((a, b) =>
+            const musicians = (profiles || []).filter(p => String(p.email || '').trim()).sort((a, b) =>
                 `${a.last_name || ''} ${a.first_name || ''}`.localeCompare(`${b.last_name || ''} ${b.first_name || ''}`, 'el', { sensitivity: 'base' })
             );
 
@@ -3810,7 +3804,7 @@
             XLSX.utils.book_append_sheet(wb, sheetFromRows(perPersonTotal), 'Άτομο - Σύνολο');
             XLSX.utils.book_append_sheet(wb, sheetFromRows(detail), 'Αναλυτικό');
 
-            const filename = 'parousies.xlsx';
+            const filename = `Parousies ${athensNowParts().date}.xlsx`;
             const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
             const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
             const file = new File([blob], filename, { type: blob.type });
