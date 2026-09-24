@@ -2854,7 +2854,7 @@
             
             if (isAdmin) {
                 html += `<p class="text-xs text-slate-400 mb-2">Συγκεντρωτική κατάσταση παρουσιών</p>
-                <button onclick="exportAttendanceWorkbook()" class="mb-3 w-full bg-emerald-700 hover:bg-emerald-600 text-white py-2 rounded-lg text-xs font-semibold">Εξαγωγή παρουσιών (CSV)</button>`;
+                <button onclick="exportAttendanceWorkbook()" class="mb-3 w-full bg-emerald-700 hover:bg-emerald-600 text-white py-2 rounded-lg text-xs font-semibold">Εξαγωγή παρουσιών (Excel)</button>`;
 
                 const vapidOK = !!urlB64ToUint8Array(VAPID_PUBLIC_KEY);
                 const edgeFnOK = !!(PUSH_EDGE_FUNCTION_URL && PUSH_EDGE_FUNCTION_URL.length > 20);
@@ -2993,7 +2993,7 @@
                                 </div>`;
                         const rollCall = eventOver ? `
                                 <div class="bg-slate-900 p-2.5 rounded border border-amber-800/50 text-xs">
-                                    <span class="text-amber-300 font-semibold block mb-1">Πραγματική παρουσία (πληρωμή)</span>
+                                    <span class="text-amber-300 font-semibold block mb-1">Πραγματική παρουσία</span>
                                     <p class="text-[10px] text-slate-400 mb-2">Η δήλωση μένει ως έχει. Εδώ σημειώνετε ποιος ήρθε τελικά.</p>
                                     ${[...musicianProfiles].sort((a, b) => `${a.last_name || ''} ${a.first_name || ''}`.localeCompare(`${b.last_name || ''} ${b.first_name || ''}`, 'el', { sensitivity: 'base' })).map(profile => {
                                         const email = String(profile.email || '').trim().toLowerCase();
@@ -3664,43 +3664,161 @@
             document.body.appendChild(toast);
         }
 
+        async function loadXlsxLibrary() {
+            if (window.XLSX) return window.XLSX;
+            await new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+                script.onload = resolve;
+                script.onerror = () => reject(new Error('Αδυναμία φόρτωσης Excel βιβλιοθήκης.'));
+                document.head.appendChild(script);
+            });
+            return window.XLSX;
+        }
+
+        function autosizeSheetColumns(ws, aoa) {
+            const colCount = Math.max(0, ...aoa.map(row => row.length));
+            ws['!cols'] = Array.from({ length: colCount }, (_, i) => {
+                let max = 8;
+                aoa.forEach(row => {
+                    const len = String(row[i] ?? '').length;
+                    if (len > max) max = len;
+                });
+                return { wch: Math.min(48, max + 1) };
+            });
+        }
+
+        function musicianFullName(profile, email) {
+            return `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || email || '';
+        }
+
+        function rsvpStatusLabel(status) {
+            const st = String(status || '').toLowerCase();
+            if (st === 'going') return 'Θα είναι εκεί';
+            if (st === 'not going') return 'Δεν μπορώ';
+            return 'Χωρίς δήλωση';
+        }
+
+        function actualAttendanceLabel(actual) {
+            if (actual === 'present') return 'Παρευρέθηκε';
+            if (actual === 'absent') return 'Απών';
+            return '';
+        }
+
         async function exportAttendanceWorkbook() {
             if (!isPrivilegedRole()) return;
+            let XLSX;
+            try {
+                XLSX = await loadXlsxLibrary();
+            } catch (e) {
+                showAppNotice(e.message || 'Αδυναμία εξαγωγής Excel.');
+                return;
+            }
+
             const [{ data: events }, { data: profiles }, { data: responses }] = await Promise.all([
                 supabaseClient.from('band_events').select('id, event_name, event_type, date, time'),
                 supabaseClient.from('profiles').select('email, first_name, last_name, instrument, role'),
                 supabaseClient.from('event_responses').select('event_id, user_email, status, excuse, actual_attendance')
             ]);
-            const rows = [['Εκδήλωση', 'Ημερομηνία', 'Ώρα', 'Μουσικός', 'Όργανο', 'Δήλωση', 'Αιτιολογία', 'Πραγματική παρουσία']];
-            (events || []).forEach(ev => {
-                (responses || []).filter(r => r.event_id === ev.id).forEach(r => {
-                    const profile = (profiles || []).find(p => String(p.email || '').trim().toLowerCase() === String(r.user_email || '').trim().toLowerCase());
-                    const actual = r.actual_attendance === 'present' ? 'Παρευρέθηκε' : (r.actual_attendance === 'absent' ? 'Απών' : '');
-                    rows.push([
+
+            const endedEvents = (events || []).filter(ev => eventHasEnded(ev));
+            sortEventsChronologically(endedEvents);
+
+            const musicians = (profiles || []).filter(p => {
+                const role = String(p.role || '').toLowerCase();
+                return role !== 'admin' && role !== 'conductor';
+            }).sort((a, b) =>
+                `${a.last_name || ''} ${a.first_name || ''}`.localeCompare(`${b.last_name || ''} ${b.first_name || ''}`, 'el', { sensitivity: 'base' })
+            );
+
+            const responsesByEvent = new Map();
+            (responses || []).forEach(row => {
+                if (!responsesByEvent.has(row.event_id)) responsesByEvent.set(row.event_id, []);
+                responsesByEvent.get(row.event_id).push(row);
+            });
+
+            const responseFor = (eventId, email) => {
+                const list = responsesByEvent.get(eventId) || [];
+                return list.find(r => String(r.user_email || '').trim().toLowerCase() === email);
+            };
+
+            const sheetFromRows = (aoa) => {
+                const ws = XLSX.utils.aoa_to_sheet(aoa);
+                autosizeSheetColumns(ws, aoa);
+                return ws;
+            };
+
+            const perEvent = [['Εκδήλωση', 'Ημερομηνία', 'Ώρα', 'Παρουσίες', 'Απουσίες']];
+            endedEvents.forEach(ev => {
+                let present = 0;
+                let absent = 0;
+                musicians.forEach(p => {
+                    const email = String(p.email || '').trim().toLowerCase();
+                    const actual = responseFor(ev.id, email)?.actual_attendance;
+                    if (actual === 'present') present++;
+                    else if (actual === 'absent') absent++;
+                });
+                perEvent.push([
+                    ev.event_name || '',
+                    ev.date ? String(ev.date).split('T')[0] : '',
+                    formatEventTime(ev.time),
+                    present,
+                    absent
+                ]);
+            });
+
+            const tallyFor = (list) => musicians.map(p => {
+                const email = String(p.email || '').trim().toLowerCase();
+                let present = 0;
+                let absent = 0;
+                list.forEach(ev => {
+                    const actual = responseFor(ev.id, email)?.actual_attendance;
+                    if (actual === 'present') present++;
+                    else if (actual === 'absent') absent++;
+                });
+                return [musicianFullName(p, email), present, absent];
+            });
+
+            const officialEnded = endedEvents.filter(ev => !isRehearsalEvent(ev));
+            const rehearsalEnded = endedEvents.filter(ev => isRehearsalEvent(ev));
+            const perPersonEvents = [['Μουσικός', 'Παρουσίες', 'Απουσίες'], ...tallyFor(officialEnded)];
+            const perPersonRehearsals = [['Μουσικός', 'Παρουσίες', 'Απουσίες'], ...tallyFor(rehearsalEnded)];
+            const perPersonTotal = [['Μουσικός', 'Συνολικές Παρουσίες', 'Συνολικές Απουσίες'], ...tallyFor(endedEvents)];
+
+            const detail = [['Εκδήλωση', 'Ημερομηνία', 'Ώρα', 'Μουσικός', 'Όργανο', 'Κατάσταση', 'Αιτιολογία', 'Πραγματική παρουσία']];
+            endedEvents.forEach(ev => {
+                musicians.forEach(p => {
+                    const email = String(p.email || '').trim().toLowerCase();
+                    const row = responseFor(ev.id, email);
+                    detail.push([
                         ev.event_name || '',
                         ev.date ? String(ev.date).split('T')[0] : '',
                         formatEventTime(ev.time),
-                        `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || r.user_email,
-                        profile?.instrument || '',
-                        r.status || '',
-                        r.excuse || '',
-                        actual
+                        musicianFullName(p, email),
+                        p.instrument || '',
+                        rsvpStatusLabel(row?.status),
+                        row?.excuse || '',
+                        actualAttendanceLabel(row?.actual_attendance)
                     ]);
                 });
             });
-            const csv = rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\r\n');
-            const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
-            const file = new File([blob], 'parousies.csv', { type: blob.type });
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, sheetFromRows(perEvent), 'Ανά εκδήλωση');
+            XLSX.utils.book_append_sheet(wb, sheetFromRows(perPersonEvents), 'Άτομο - Εκδηλώσεις');
+            XLSX.utils.book_append_sheet(wb, sheetFromRows(perPersonRehearsals), 'Άτομο - Πρόβες');
+            XLSX.utils.book_append_sheet(wb, sheetFromRows(perPersonTotal), 'Άτομο - Σύνολο');
+            XLSX.utils.book_append_sheet(wb, sheetFromRows(detail), 'Αναλυτικό');
+
+            const filename = 'parousies.xlsx';
+            const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+            const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const file = new File([blob], filename, { type: blob.type });
             if (navigator.share && navigator.canShare?.({ files: [file] })) {
                 await navigator.share({ files: [file], title: 'Παρουσίες' });
                 return;
             }
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'parousies.csv';
-            a.click();
-            URL.revokeObjectURL(url);
+            XLSX.writeFile(wb, filename);
         }
 
         async function renderProfileTab() {
