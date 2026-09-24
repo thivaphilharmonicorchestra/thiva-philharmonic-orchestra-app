@@ -1411,7 +1411,7 @@
 
             const [{ data: announcements, error: announcementsError }, { data: events, error: eventsError }] = await Promise.all([
                 supabaseClient.from('announcement_log').select('id, title, body, created_at').order('created_at', { ascending: false }).limit(3),
-                supabaseClient.from('band_events').select('id, event_name, event_type, date, time, location').gte('date', new Date().toISOString().split('T')[0]).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true }).limit(1)
+                supabaseClient.from('band_events').select('id, event_name, event_type, date, time, location').gte('date', new Date().toISOString().split('T')[0]).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
             ]);
             sortEventsChronologically(events);
 
@@ -1422,7 +1422,7 @@
 
             const firstName = currentProfile?.first_name || currentProfile?.name || 'μουσικέ';
             const vocativeFirstName = getGreekVocativeName(firstName);
-            const nextEvent = events?.[0];
+            const nextEvent = (events || []).find(ev => !isRehearsalEvent(ev));
             let html = `
                 <div class="flex items-center justify-between mb-5">
                     <div>
@@ -2797,7 +2797,7 @@
                 html += `
                     <div class="mt-8 bg-slate-800 p-4 rounded-xl border border-slate-700">
                         <h3 class="font-bold text-sm text-indigo-400 mb-3">Διαχειριστής: Νέα Εκδήλωση</h3>
-                        <input type="text" id="e-name" placeholder="Όνομα Εκδήλωσης (π.χ., Λιτανεία)" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                        <input type="text" id="e-name" placeholder="Όνομα (π.χ., Λιτανεία · για πρόβα βάλτε τη λέξη πρόβα στον τίτλο)" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
                         <input type="text" id="e-type" placeholder="Τύπος (π.χ., Παρέλαση, Πρόβα, Συναυλία)" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
                         <div class="grid grid-cols-2 gap-2 mb-2">
                             <div>
@@ -3085,6 +3085,14 @@
                 if (timeCompare !== 0) return timeCompare;
                 return Number(a.id || 0) - Number(b.id || 0);
             });
+        }
+
+        function isRehearsalEvent(ev) {
+            const folded = String(ev?.event_name || '')
+                .normalize('NFD')
+                .replace(/\p{M}/gu, '')
+                .toLowerCase();
+            return folded.includes('προβα');
         }
 
         function isPastEvent(ev) {
