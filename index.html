@@ -1105,7 +1105,12 @@
         }
 
         function isConductorRole() {
-            return currentProfile?.role === 'conductor';
+            const role = String(currentProfile?.role || '')
+                .normalize('NFD')
+                .replace(/\p{M}/gu, '')
+                .toLowerCase()
+                .trim();
+            return role === 'conductor' || role === 'μαεστρος' || role === 'maestro';
         }
 
         function isMusicianRole() {
