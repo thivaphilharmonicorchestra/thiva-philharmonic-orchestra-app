@@ -1171,7 +1171,7 @@
 
         function legacyAssignmentLabel() {
             const legacy = (currentProfile?.instrument || '').trim();
-            if (legacy === 'Κρουστά' || legacy === 'Percussion' || legacy === 'Percussion (all)') return 'Percussion (all)';
+            if (legacy === 'Κρουστά' || legacy === 'Percussion' || legacy === 'Percussion (all)' || legacy === 'Percussion Section') return 'Percussion Section';
             if (legacy && legacy !== 'Μαέστρος' && legacy !== 'Μη ορισμένο') return legacy;
             return '';
         }
@@ -1179,9 +1179,9 @@
         function hasPercussionAllAssignment() {
             if ((currentProfile?.assignments || []).some(row => {
                 const rel = Array.isArray(row.instruments) ? row.instruments[0] : row.instruments;
-                return rel?.name === 'Percussion (all)' || rel?.is_section === true;
+                return rel?.name === 'Percussion Section' || rel?.name === 'Percussion (all)' || rel?.is_section === true;
             })) return true;
-            return legacyAssignmentLabel() === 'Percussion (all)';
+            return legacyAssignmentLabel() === 'Percussion Section';
         }
 
         function canFilterMusicInstruments() {
@@ -1204,20 +1204,21 @@
 
         function instrumentUiName(name, isSection) {
             const n = (name || '').trim();
-            if (isSection || n === 'Percussion (all)') return 'Percussion Section';
+            if (isSection || n === 'Percussion (all)' || n === 'Percussion Section') return 'Percussion Section';
+            if (n === 'French Horn') return 'Horn in F';
             return n;
         }
 
         function relationIsSection(rel) {
             if (!rel) return false;
             const row = Array.isArray(rel) ? rel[0] : rel;
-            return row?.is_section === true || row?.name === 'Percussion (all)';
+            return row?.is_section === true || row?.name === 'Percussion (all)' || row?.name === 'Percussion Section';
         }
 
         function musicPartLabel(item) {
             const part = Array.isArray(item?.musical_parts) ? item.musical_parts[0] : item?.musical_parts;
             const instrumentName = relationName(part?.instruments);
-            if (instrumentName === 'Percussion (all)' || relationIsSection(part?.instruments)) {
+            if (instrumentName === 'Percussion (all)' || instrumentName === 'Percussion Section' || relationIsSection(part?.instruments)) {
                 return 'Percussion';
             }
             const base = instrumentName || item?.instrument_part || '';
@@ -1697,7 +1698,7 @@
                         ${canFilterMusicInstruments() ? `
                         <select id="mf-instrument" class="p-2 bg-slate-900 border border-slate-700 rounded text-xs text-white">
                             <option value="all">${hasPercussionAllAssignment() && !isPrivilegedRole() ? 'Percussion Section' : `Όλα τα μέρη (${partNames.length})`}</option>
-                            ${partNames.filter(ins => !(hasPercussionAllAssignment() && !isPrivilegedRole() && ins === 'Percussion (all)')).map(ins => `<option value="${escapeHtml(ins)}" ${musicFilter.instrument === ins ? 'selected':''}>${escapeHtml(ins)}</option>`).join('')}
+                            ${partNames.filter(ins => !(hasPercussionAllAssignment() && !isPrivilegedRole() && (ins === 'Percussion (all)' || ins === 'Percussion Section'))).map(ins => `<option value="${escapeHtml(ins)}" ${musicFilter.instrument === ins ? 'selected':''}>${escapeHtml(ins)}</option>`).join('')}
                         </select>
                         ` : '<div></div>'}
                         <select id="mf-set" class="p-2 bg-slate-900 border border-slate-700 rounded text-xs text-white">
