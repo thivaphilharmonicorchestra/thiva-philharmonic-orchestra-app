@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'thiva-philharmonic-v61';
+const CACHE_VERSION = 'thiva-philharmonic-v62';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 
 const STATIC_ASSETS = [
@@ -70,9 +70,6 @@ self.addEventListener('fetch', (event) => {
     if (req.method !== 'GET') return;
 
     if (isPdfRequest(url.href) || (req.headers.get('accept') || '').includes('application/pdf') || isSupabaseApi(url.href)) {
-        event.respondWith(
-            fetch(req).catch(() => new Response('Unavailable', { status: 503, statusText: 'Unavailable' }))
-        );
         return;
     }
 
