@@ -453,6 +453,18 @@
             }
         };
 
+        function fetchWithTimeout(input, init = {}) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 20000);
+            const userSignal = init.signal;
+            if (userSignal) {
+                if (userSignal.aborted) controller.abort();
+                else userSignal.addEventListener('abort', () => controller.abort(), { once: true });
+            }
+            const { signal, ...rest } = init;
+            return fetch(input, { ...rest, signal: controller.signal }).finally(() => clearTimeout(timer));
+        }
+
         const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
             auth: {
                 detectSessionInUrl: true,
@@ -460,8 +472,33 @@
                 autoRefreshToken: true,
                 storage: authStorage,
                 flowType: 'pkce'
+            },
+            global: {
+                fetch: fetchWithTimeout
             }
         });
+
+        let lastAuthResumeAt = 0;
+        let authResumeInFlight = false;
+        async function resumeAppAfterBackground() {
+            if (document.visibilityState && document.visibilityState !== 'visible') return;
+            if (authResumeInFlight) return;
+            const now = Date.now();
+            if (now - lastAuthResumeAt < 2000) return;
+            lastAuthResumeAt = now;
+            authResumeInFlight = true;
+            try {
+                supabaseClient.auth.startAutoRefresh();
+                await Promise.race([
+                    supabaseClient.auth.refreshSession(),
+                    new Promise((resolve) => setTimeout(resolve, 8000))
+                ]);
+            } catch (error) {
+                console.warn('Session resume after background failed:', error);
+            } finally {
+                authResumeInFlight = false;
+            }
+        }
 
         const LOGO_URL = 'https://raw.githubusercontent.com/thivaphilharmonic-maker/thiva-philharmonic-orchestra-app/main/logo.png';
         const APP_ICON_URL = './thiva_app_icon.png';
@@ -836,10 +873,18 @@
         window.addEventListener('resize', onViewportChange);
 
         window.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible' && pdfDoc && !document.getElementById('pdf-viewer-container').classList.contains('hidden')) {
-                requestPdfWakeLock();
+            if (document.visibilityState === 'visible') {
+                resumeAppAfterBackground();
+                if (pdfDoc && !document.getElementById('pdf-viewer-container').classList.contains('hidden')) {
+                    requestPdfWakeLock();
+                }
+            } else {
+                try { supabaseClient.auth.stopAutoRefresh(); } catch {}
             }
         });
+        window.addEventListener('pageshow', () => resumeAppAfterBackground());
+        window.addEventListener('focus', () => resumeAppAfterBackground());
+        window.addEventListener('online', () => resumeAppAfterBackground());
         window.addEventListener('popstate', () => {
             if (!viewerHistoryActive) return;
             viewerHistoryActive = false;
