@@ -1738,7 +1738,13 @@
                             <p class="text-xs text-slate-400 truncate">${escapeHtml(item.composer || 'Άγνωστος Συνθέτης')} • ${escapeHtml(musicPartLabel(item))}</p>
                         </div>
                         <div class="flex space-x-1.5 shrink-0 ml-2">
-                            ${filePath ? `<button onclick="openSecurePdf('${encodeURIComponent(filePath)}', ${Number(item.id)})" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-2 rounded-lg text-xs font-semibold transition text-white whitespace-nowrap">Άνοιγμα</button>` : ''}
+                            ${filePath ? `
+                            <button type="button" onclick="openSecurePdf('${encodeURIComponent(filePath)}', ${Number(item.id)})" class="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white" aria-label="Άνοιγμα παρτιτούρας" title="Άνοιγμα">
+                                <svg aria-hidden="true" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h7l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M13 3v5h5"></path></svg>
+                            </button>
+                            <button type="button" onclick="shareSheetPdf('${encodeURIComponent(filePath)}', '${encodeURIComponent(item.piece_title || 'partitura')}')" class="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100" aria-label="Κοινοποίηση παρτιτούρας" title="Κοινοποίηση">
+                                <svg aria-hidden="true" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.5"></circle><circle cx="6" cy="12" r="2.5"></circle><circle cx="18" cy="19" r="2.5"></circle><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6"></path></svg>
+                            </button>` : ''}
                         </div>
                     </div>`;
             }).join('')}</div>`;
@@ -1846,6 +1852,45 @@
             }
 
             openPdfViewer(data.signedUrl, pieceId);
+        }
+
+        function safePdfFileName(title) {
+            const base = String(title || 'partitura').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'partitura';
+            return `${base.slice(0, 80)}.pdf`;
+        }
+
+        async function fetchSignedPdfFile(filePath, title) {
+            const path = decodeURIComponent(filePath);
+            const { data, error } = await supabaseClient.storage
+                .from('sheet-music')
+                .createSignedUrl(path, 60);
+            if (error || !data?.signedUrl) {
+                throw new Error(error?.message || 'Άγνωστο σφάλμα');
+            }
+            const res = await fetch(data.signedUrl);
+            if (!res.ok) throw new Error('Αδυναμία λήψης του PDF.');
+            const blob = await res.blob();
+            return new File([blob], safePdfFileName(title), { type: 'application/pdf' });
+        }
+
+        async function shareSheetPdf(filePath, encodedTitle) {
+            const title = decodeURIComponent(encodedTitle || 'partitura');
+            try {
+                const file = await fetchSignedPdfFile(filePath, title);
+                if (navigator.share && navigator.canShare?.({ files: [file] })) {
+                    await navigator.share({ files: [file], title, text: title });
+                    return;
+                }
+                const url = URL.createObjectURL(file);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = file.name;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+            } catch (e) {
+                if (e?.name === 'AbortError') return;
+                showAppNotice('Αδυναμία κοινοποίησης: ' + (e.message || 'Άγνωστο σφάλμα'));
+            }
         }
 
         async function requestPdfWakeLock() {
@@ -3686,7 +3731,10 @@
         }
 
         function musicianFullName(profile, email) {
-            return `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || email || '';
+            const last = (profile?.last_name || '').trim();
+            const first = (profile?.first_name || '').trim();
+            if (last && first) return `${last} ${first}`;
+            return last || first || email || '';
         }
 
         function rsvpStatusLabel(status) {
@@ -3722,7 +3770,7 @@
             sortEventsChronologically(endedEvents);
 
             const musicians = (profiles || []).filter(p => String(p.email || '').trim()).sort((a, b) =>
-                `${a.last_name || ''} ${a.first_name || ''}`.localeCompare(`${b.last_name || ''} ${b.first_name || ''}`, 'el', { sensitivity: 'base' })
+                musicianFullName(a).localeCompare(musicianFullName(b), 'el', { sensitivity: 'base' })
             );
 
             const responsesByEvent = new Map();
