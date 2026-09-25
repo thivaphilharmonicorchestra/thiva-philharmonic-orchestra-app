@@ -860,13 +860,19 @@
                 type: (search.get('type') || hash.get('type') || '').toLowerCase(),
                 code: search.get('code') || hash.get('code'),
                 tokenHash: search.get('token_hash') || hash.get('token_hash'),
+                token: search.get('token') || hash.get('token'),
+                accessToken: hash.get('access_token'),
+                refreshToken: hash.get('refresh_token'),
                 error: search.get('error') || hash.get('error'),
                 errorDescription: search.get('error_description') || hash.get('error_description')
             };
         }
 
         function isPasswordSetupCallback(cb = authCallbackParams()) {
-            return ['invite', 'recovery', 'signup'].includes(cb.type) || !!cb.code || !!cb.tokenHash;
+            return ['invite', 'recovery', 'signup'].includes(cb.type)
+                || !!cb.code
+                || !!cb.tokenHash
+                || !!cb.accessToken;
         }
 
         function clearAuthCallbackFromUrl() {
@@ -892,10 +898,36 @@
         async function completeAuthFromUrl() {
             const cb = authCallbackParams();
 
-            if (cb.tokenHash && ['invite', 'recovery', 'signup', 'email', 'magiclink'].includes(cb.type || 'invite')) {
-                const otpType = cb.type === 'magiclink' ? 'email' : (cb.type || 'invite');
+            if (cb.accessToken) {
+                const { data, error } = await supabaseClient.auth.setSession({
+                    access_token: cb.accessToken,
+                    refresh_token: cb.refreshToken || ''
+                });
+                if (data?.session) return { session: data.session, type: cb.type || 'invite', error: null };
+                if (error && !isUsedAuthLinkError(error.message)) {
+                    return { session: null, type: cb.type, error: error.message };
+                }
+            }
+
+            const otpType = ['invite', 'recovery', 'signup', 'email', 'magiclink'].includes(cb.type)
+                ? (cb.type === 'magiclink' ? 'email' : cb.type)
+                : 'invite';
+
+            if (cb.tokenHash) {
                 const { error } = await supabaseClient.auth.verifyOtp({
                     token_hash: cb.tokenHash,
+                    type: otpType
+                });
+                const { data: { session } } = await supabaseClient.auth.getSession();
+                if (session) return { session, type: cb.type || 'invite', error: null };
+                if (error && !isUsedAuthLinkError(error.message)) {
+                    return { session: null, type: cb.type, error: error.message };
+                }
+            }
+
+            if (cb.token && !cb.code) {
+                const { error } = await supabaseClient.auth.verifyOtp({
+                    token: cb.token,
                     type: otpType
                 });
                 const { data: { session } } = await supabaseClient.auth.getSession();
@@ -912,13 +944,6 @@
                 if (error && !isUsedAuthLinkError(error.message)) {
                     return { session: null, type: cb.type, error: error.message };
                 }
-                if (error || !session) {
-                    return {
-                        session: null,
-                        type: cb.type,
-                        error: 'Ο σύνδεσμος χρησιμοποιήθηκε ήδη ή έληξε. Ζητήστε νέα πρόσκληση, ή συνδεθείτε αν έχετε ήδη ορίσει κωδικό.'
-                    };
-                }
             }
 
             let { data: { session } } = await supabaseClient.auth.getSession();
@@ -931,6 +956,13 @@
                     session: null,
                     type: cb.type,
                     error: decodeURIComponent((cb.errorDescription || cb.error).replace(/\+/g, ' '))
+                };
+            }
+            if (cb.code || cb.tokenHash || cb.token || cb.accessToken || ['invite', 'recovery', 'signup'].includes(cb.type)) {
+                return {
+                    session: null,
+                    type: cb.type,
+                    error: 'Δεν ολοκληρώθηκε η πρόσκληση. Ελέγξτε ότι το Site URL στο Supabase είναι η διεύθυνση της εφαρμογής, και ζητήστε νέα πρόσκληση.'
                 };
             }
             return { session: null, type: cb.type, error: null };
@@ -996,13 +1028,8 @@
                 return;
             }
 
-            if (error && !isUsedAuthLinkError(error)) {
+            if (error) {
                 renderLogin(error);
-                return;
-            }
-
-            if (isPasswordSetupCallback(cbInfo) && !session) {
-                renderLogin('Ο σύνδεσμος χρησιμοποιήθηκε ήδη ή έληξε. Ζητήστε νέα πρόσκληση, ή συνδεθείτε αν έχετε ήδη ορίσει κωδικό.');
                 return;
             }
 
