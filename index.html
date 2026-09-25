@@ -471,32 +471,47 @@
                 persistSession: true,
                 autoRefreshToken: true,
                 storage: authStorage,
-                flowType: 'pkce'
+                flowType: 'pkce',
+                lock: async (_name, _acquireTimeout, fn) => fn()
             },
             global: {
                 fetch: fetchWithTimeout
             }
         });
 
-        let lastAuthResumeAt = 0;
-        let authResumeInFlight = false;
-        async function resumeAppAfterBackground() {
+        let appHiddenAt = 0;
+        let tabLoadGen = 0;
+        let requirePasswordSetup = false;
+        const BACKGROUND_RELOAD_MS = 30000;
+        const TAB_LOAD_RELOAD_MS = 25000;
+
+        function isPdfViewerOpen() {
+            const el = document.getElementById('pdf-viewer-container');
+            return !!(typeof pdfDoc !== 'undefined' && pdfDoc && el && !el.classList.contains('hidden'));
+        }
+
+        function resumeAppAfterBackground(event) {
             if (document.visibilityState && document.visibilityState !== 'visible') return;
-            if (authResumeInFlight) return;
-            const now = Date.now();
-            if (now - lastAuthResumeAt < 2000) return;
-            lastAuthResumeAt = now;
-            authResumeInFlight = true;
+            const sleptMs = appHiddenAt ? Date.now() - appHiddenAt : 0;
+            const fromBfcache = !!(event && event.type === 'pageshow' && event.persisted);
+            if ((fromBfcache || sleptMs >= BACKGROUND_RELOAD_MS) && !isPdfViewerOpen() && !requirePasswordSetup) {
+                window.location.reload();
+                return;
+            }
+            appHiddenAt = 0;
+            try { supabaseClient.auth.startAutoRefresh(); } catch {}
+        }
+
+        async function runTabLoad(loader) {
+            const gen = ++tabLoadGen;
+            const watchdog = setTimeout(() => {
+                if (gen !== tabLoadGen || isPdfViewerOpen() || requirePasswordSetup) return;
+                window.location.reload();
+            }, TAB_LOAD_RELOAD_MS);
             try {
-                supabaseClient.auth.startAutoRefresh();
-                await Promise.race([
-                    supabaseClient.auth.refreshSession(),
-                    new Promise((resolve) => setTimeout(resolve, 8000))
-                ]);
-            } catch (error) {
-                console.warn('Session resume after background failed:', error);
+                await loader();
             } finally {
-                authResumeInFlight = false;
+                if (gen === tabLoadGen) clearTimeout(watchdog);
             }
         }
 
@@ -875,22 +890,23 @@
         window.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
                 resumeAppAfterBackground();
-                if (pdfDoc && !document.getElementById('pdf-viewer-container').classList.contains('hidden')) {
-                    requestPdfWakeLock();
-                }
+                if (isPdfViewerOpen()) requestPdfWakeLock();
             } else {
+                appHiddenAt = Date.now();
                 try { supabaseClient.auth.stopAutoRefresh(); } catch {}
             }
         });
-        window.addEventListener('pageshow', () => resumeAppAfterBackground());
+        window.addEventListener('pageshow', (event) => resumeAppAfterBackground(event));
         window.addEventListener('focus', () => resumeAppAfterBackground());
         window.addEventListener('online', () => resumeAppAfterBackground());
+        document.addEventListener('touchstart', () => {
+            if (appHiddenAt) resumeAppAfterBackground();
+        }, { passive: true });
         window.addEventListener('popstate', () => {
             if (!viewerHistoryActive) return;
             viewerHistoryActive = false;
             closePdfViewer(true);
         });
-        let requirePasswordSetup = false;
         let passwordSetupMode = 'invite';
         let serviceWorkerRegistration = null;
 
@@ -1054,6 +1070,7 @@
 
                 if (nextSession) {
                     currentUser = nextSession.user;
+                    if (event === 'TOKEN_REFRESHED') return;
                     await fetchProfile();
                     renderApp();
                 } else if (event !== 'INITIAL_SESSION' || authReady) {
@@ -1511,12 +1528,12 @@
                 await fetchProfile();
             }
 
-            if (activeTab === 'music') renderMusicTab();
-            else if (activeTab === 'events') renderEventsTab();
-            else if (activeTab === 'home') renderHomeTab();
-            else if (activeTab === 'attendance') renderAttendanceTab();
-            else if (activeTab === 'profile') renderProfileTab();
-            else if (activeTab === 'notifications') renderNotificationsTab();
+            if (activeTab === 'music') runTabLoad(renderMusicTab);
+            else if (activeTab === 'events') runTabLoad(renderEventsTab);
+            else if (activeTab === 'home') runTabLoad(renderHomeTab);
+            else if (activeTab === 'attendance') runTabLoad(renderAttendanceTab);
+            else if (activeTab === 'profile') runTabLoad(renderProfileTab);
+            else if (activeTab === 'notifications') runTabLoad(renderNotificationsTab);
         }
 
         async function renderHomeTab() {
