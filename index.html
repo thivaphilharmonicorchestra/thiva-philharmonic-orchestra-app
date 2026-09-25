@@ -550,6 +550,7 @@
 
         let currentUser = null;
         let currentProfile = null;
+        let assignmentDirectory = [];
         let eventsViewMode = 'list'; 
         let selectedCalendarDate = null;
         let eventsTabCache = { events: null, responses: null };
@@ -1099,14 +1100,15 @@
                 currentProfile = { email: currentUser.email, role: 'musician', instrument: 'Μη ορισμένο' };
             }
 
+            assignmentDirectory = [];
             if (candidateIds.length) {
                 let assignments = [];
                 const withNames = await supabaseClient
                     .from('user_instruments')
-                    .select('user_id, instrument_id, part_position, concert_set, instruments(name, is_section, is_percussion)')
-                    .in('user_id', candidateIds);
+                    .select('user_id, instrument_id, part_position, concert_set, instruments(name, is_section, is_percussion)');
                 if (!withNames.error) {
-                    assignments = withNames.data || [];
+                    assignmentDirectory = withNames.data || [];
+                    assignments = assignmentDirectory.filter(row => candidateIds.includes(row.user_id));
                 } else {
                     const plain = await supabaseClient
                         .from('user_instruments')
@@ -1124,6 +1126,7 @@
                                 : row.instruments
                         }));
                     }
+                    assignmentDirectory = assignments;
                 }
                 const assignedIds = new Set(assignments.map(row => row.user_id).filter(Boolean));
                 const ranked = candidates.slice().sort((a, b) => {
@@ -1224,6 +1227,25 @@
             return base || item?.concert_set || 'Γενικό';
         }
 
+        function instrumentPeerCount(instrumentId) {
+            if (!instrumentId) return 0;
+            const users = new Set(
+                (assignmentDirectory || [])
+                    .filter(row => row.instrument_id === instrumentId && !row.concert_set)
+                    .map(row => row.user_id)
+                    .filter(Boolean)
+            );
+            return users.size;
+        }
+
+        function assignmentRowLabel(row) {
+            const name = instrumentUiName(relationName(row.instruments), relationIsSection(row.instruments)) || 'Όργανο';
+            const showPart = Boolean(row.part_position) && instrumentPeerCount(row.instrument_id) > 1;
+            let label = showPart ? `${name} ${row.part_position}` : name;
+            if (row.concert_set) label += ` · ${row.concert_set}`;
+            return label;
+        }
+
         function assignmentLabels() {
             const all = currentProfile?.assignments || [];
             const general = all.filter(row => !row.concert_set);
@@ -1232,12 +1254,7 @@
                 const legacy = legacyAssignmentLabel();
                 return legacy ? [legacy] : [];
             }
-            return rows.map(row => {
-                const name = instrumentUiName(relationName(row.instruments), relationIsSection(row.instruments)) || 'Όργανο';
-                let label = row.part_position ? `${name} ${row.part_position}` : name;
-                if (row.concert_set) label += ` · ${row.concert_set}`;
-                return label;
-            });
+            return rows.map(assignmentRowLabel);
         }
 
         function getGreekVocativeName(name) {
@@ -3997,6 +4014,7 @@
             }
             window.adminAssignmentPeople = people || [];
             window.adminAssignmentInstruments = (instruments || []).filter(ins => ins.name !== 'Full Score');
+            assignmentDirectory = rows || [];
             const byUser = {};
             (rows || []).forEach(row => {
                 if (!byUser[row.user_id]) byUser[row.user_id] = [];
@@ -4014,11 +4032,8 @@
                 if (!assigns.length) return '';
                 const name = `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.email;
                 const items = assigns.map(row => {
-                    const insName = instrumentUiName(relationName(row.instruments), relationIsSection(row.instruments)) || 'Όργανο';
-                    const part = row.part_position ? ` ${row.part_position}` : '';
-                    const set = row.concert_set ? ` · ${row.concert_set}` : '';
                     return `<div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-700/70 last:border-0">
-                        <span class="text-xs text-slate-200">${escapeHtml(insName + part + set)}</span>
+                        <span class="text-xs text-slate-200">${escapeHtml(assignmentRowLabel(row))}</span>
                         <button type="button" data-del-assign="${row.id}" class="text-[10px] text-red-300 hover:text-red-200">Διαγραφή</button>
                     </div>`;
                 }).join('');
