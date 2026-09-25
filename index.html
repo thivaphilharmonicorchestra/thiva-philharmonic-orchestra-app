@@ -859,13 +859,14 @@
             return {
                 type: (search.get('type') || hash.get('type') || '').toLowerCase(),
                 code: search.get('code') || hash.get('code'),
+                tokenHash: search.get('token_hash') || hash.get('token_hash'),
                 error: search.get('error') || hash.get('error'),
                 errorDescription: search.get('error_description') || hash.get('error_description')
             };
         }
 
         function isPasswordSetupCallback(cb = authCallbackParams()) {
-            return ['invite', 'recovery', 'signup'].includes(cb.type) || !!cb.code;
+            return ['invite', 'recovery', 'signup'].includes(cb.type) || !!cb.code || !!cb.tokenHash;
         }
 
         function clearAuthCallbackFromUrl() {
@@ -890,23 +891,37 @@
 
         async function completeAuthFromUrl() {
             const cb = authCallbackParams();
-            let { data: { session } } = await supabaseClient.auth.getSession();
 
-            if (!session && cb.code) {
-                const { error } = await supabaseClient.auth.exchangeCodeForSession(cb.code);
-                ({ data: { session } } = await supabaseClient.auth.getSession());
-                if (!session) {
-                    await new Promise(resolve => setTimeout(resolve, 250));
-                    ({ data: { session } } = await supabaseClient.auth.getSession());
-                }
-                if (session) {
-                    return { session, type: cb.type, error: null };
-                }
+            if (cb.tokenHash && ['invite', 'recovery', 'signup', 'email', 'magiclink'].includes(cb.type || 'invite')) {
+                const otpType = cb.type === 'magiclink' ? 'email' : (cb.type || 'invite');
+                const { error } = await supabaseClient.auth.verifyOtp({
+                    token_hash: cb.tokenHash,
+                    type: otpType
+                });
+                const { data: { session } } = await supabaseClient.auth.getSession();
+                if (session) return { session, type: cb.type || 'invite', error: null };
                 if (error && !isUsedAuthLinkError(error.message)) {
                     return { session: null, type: cb.type, error: error.message };
                 }
             }
 
+            if (cb.code) {
+                const { error } = await supabaseClient.auth.exchangeCodeForSession(cb.code);
+                const { data: { session } } = await supabaseClient.auth.getSession();
+                if (session) return { session, type: cb.type || 'invite', error: null };
+                if (error && !isUsedAuthLinkError(error.message)) {
+                    return { session: null, type: cb.type, error: error.message };
+                }
+                if (error || !session) {
+                    return {
+                        session: null,
+                        type: cb.type,
+                        error: 'Ο σύνδεσμος χρησιμοποιήθηκε ήδη ή έληξε. Ζητήστε νέα πρόσκληση, ή συνδεθείτε αν έχετε ήδη ορίσει κωδικό.'
+                    };
+                }
+            }
+
+            let { data: { session } } = await supabaseClient.auth.getSession();
             if (session) {
                 return { session, type: cb.type, error: null };
             }
@@ -932,13 +947,10 @@
             if (window.location.hash === '#attendance') activeTab = 'attendance';
 
             const cbInfo = authCallbackParams();
-            const callback = ['invite', 'recovery', 'signup'].includes(cbInfo.type);
-            if (callback || cbInfo.code) {
-                renderAuthLoading();
-            }
-            if (callback) {
+            if (isPasswordSetupCallback(cbInfo)) {
                 requirePasswordSetup = true;
                 passwordSetupMode = cbInfo.type === 'recovery' ? 'recovery' : 'invite';
+                renderAuthLoading();
             }
 
             let authReady = false;
@@ -986,6 +998,11 @@
 
             if (error && !isUsedAuthLinkError(error)) {
                 renderLogin(error);
+                return;
+            }
+
+            if (isPasswordSetupCallback(cbInfo) && !session) {
+                renderLogin('Ο σύνδεσμος χρησιμοποιήθηκε ήδη ή έληξε. Ζητήστε νέα πρόσκληση, ή συνδεθείτε αν έχετε ήδη ορίσει κωδικό.');
                 return;
             }
 
