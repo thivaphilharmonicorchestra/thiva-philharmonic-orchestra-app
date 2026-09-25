@@ -1739,11 +1739,11 @@
                         </div>
                         <div class="flex space-x-1.5 shrink-0 ml-2">
                             ${filePath ? `
-                            <button type="button" onclick="openSecurePdf('${encodeURIComponent(filePath)}', ${Number(item.id)})" class="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white" aria-label="Άνοιγμα παρτιτούρας" title="Άνοιγμα">
-                                <svg aria-hidden="true" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h7l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M13 3v5h5"></path></svg>
-                            </button>
                             <button type="button" onclick="shareSheetPdf('${encodeURIComponent(filePath)}', '${encodeURIComponent(item.piece_title || 'partitura')}')" class="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100" aria-label="Κοινοποίηση παρτιτούρας" title="Κοινοποίηση">
                                 <svg aria-hidden="true" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.5"></circle><circle cx="6" cy="12" r="2.5"></circle><circle cx="18" cy="19" r="2.5"></circle><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6"></path></svg>
+                            </button>
+                            <button type="button" onclick="openSecurePdf('${encodeURIComponent(filePath)}', ${Number(item.id)})" class="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white" aria-label="Άνοιγμα παρτιτούρας" title="Άνοιγμα">
+                                <svg aria-hidden="true" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h7l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M13 3v5h5"></path></svg>
                             </button>` : ''}
                         </div>
                     </div>`;
