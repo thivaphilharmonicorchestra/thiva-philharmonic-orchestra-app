@@ -2053,7 +2053,55 @@
             const res = await fetch(data.signedUrl);
             if (!res.ok) throw new Error('Αδυναμία λήψης του PDF.');
             const blob = await res.blob();
-            return new File([blob], safePdfFileName(title), { type: 'application/pdf' });
+            const original = new File([blob], safePdfFileName(title), { type: 'application/pdf' });
+            return stampSharedPdfFile(original);
+        }
+
+        async function loadPdfLib() {
+            if (window.PDFLib) return window.PDFLib;
+            await new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js';
+                script.onload = resolve;
+                script.onerror = () => reject(new Error('Αδυναμία φόρτωσης εργαλείου υδατογραφήματος.'));
+                document.head.appendChild(script);
+            });
+            if (!window.PDFLib) throw new Error('Αδυναμία φόρτωσης εργαλείου υδατογραφήματος.');
+            return window.PDFLib;
+        }
+
+        async function watermarkStripPngBytes(width, height) {
+            const scale = 3;
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.ceil(width * scale));
+            canvas.height = Math.max(1, Math.ceil(height * scale));
+            const ctx = canvas.getContext('2d');
+            ctx.scale(scale, scale);
+            applyWatermarks(ctx, width, height);
+            const blob = await new Promise((resolve, reject) => {
+                canvas.toBlob((part) => (part ? resolve(part) : reject(new Error('Αδυναμία δημιουργίας υδατογραφήματος.'))), 'image/png');
+            });
+            return new Uint8Array(await blob.arrayBuffer());
+        }
+
+        async function stampSharedPdfFile(file) {
+            const PDFLib = await loadPdfLib();
+            const pdfDoc = await PDFLib.PDFDocument.load(await file.arrayBuffer());
+            const pngByKey = new Map();
+            for (const page of pdfDoc.getPages()) {
+                const { width } = page.getSize();
+                const stripH = Math.min(18, Math.max(12, width / 40));
+                const key = `${Math.round(width)}:${Math.round(stripH * 10)}`;
+                let pngBytes = pngByKey.get(key);
+                if (!pngBytes) {
+                    pngBytes = await watermarkStripPngBytes(width, stripH);
+                    pngByKey.set(key, pngBytes);
+                }
+                const image = await pdfDoc.embedPng(pngBytes);
+                page.drawImage(image, { x: 0, y: 0, width, height: stripH });
+            }
+            const stamped = await pdfDoc.save();
+            return new File([stamped], file.name, { type: 'application/pdf' });
         }
 
         async function shareSheetPdf(filePath, encodedTitle) {
