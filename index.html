@@ -2077,7 +2077,7 @@
             canvas.height = Math.max(1, Math.ceil(height * scale));
             const ctx = canvas.getContext('2d');
             ctx.scale(scale, scale);
-            applyWatermarks(ctx, width, height);
+            applyWatermarks(ctx, width, height, { baselineBottom: true });
             const blob = await new Promise((resolve, reject) => {
                 canvas.toBlob((part) => (part ? resolve(part) : reject(new Error('Αδυναμία δημιουργίας υδατογραφήματος.'))), 'image/png');
             });
@@ -2090,7 +2090,7 @@
             const pngByKey = new Map();
             for (const page of pdfDoc.getPages()) {
                 const { width } = page.getSize();
-                const stripH = Math.min(18, Math.max(12, width / 40));
+                const stripH = Math.max(30, Math.min(42, width / 18));
                 const key = `${Math.round(width)}:${Math.round(stripH * 10)}`;
                 let pngBytes = pngByKey.get(key);
                 if (!pngBytes) {
@@ -2526,7 +2526,7 @@
             return event.changedTouches?.length === 1 && scoreStage && scoreStage.contains(event.target);
         }
 
-        function applyWatermarks(ctx, width, height) {
+        function applyWatermarks(ctx, width, height, options = {}) {
             const userEmail = currentProfile?.email || currentUser?.email || 'musician';
             const timestamp = new Date().toISOString();
 
@@ -2541,7 +2541,12 @@
             }
             ctx.fillStyle = 'rgba(148, 163, 184, 0.6)';
             ctx.textAlign = 'center';
-            ctx.fillText(watermarkText, width / 2, height - Math.max(8, baseFontSize + 3));
+            if (options.baselineBottom) {
+                ctx.textBaseline = 'bottom';
+                ctx.fillText(watermarkText, width / 2, height - 3);
+            } else {
+                ctx.fillText(watermarkText, width / 2, height - Math.max(8, baseFontSize + 3));
+            }
             ctx.restore();
 
             const fingerprintString = textToZeroWidth(`UID:${userEmail}|TS:${timestamp}`);
