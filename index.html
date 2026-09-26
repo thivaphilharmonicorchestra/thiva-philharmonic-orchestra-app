@@ -1320,6 +1320,46 @@
             return rows.map(assignmentRowLabel);
         }
 
+        function primaryAssignmentRow(profile) {
+            const all = profile?.assignments || [];
+            const general = all.filter(row => !row.concert_set).slice().sort((a, b) => {
+                const byDate = String(a.created_at || '').localeCompare(String(b.created_at || ''));
+                if (byDate) return byDate;
+                return String(a.id || '').localeCompare(String(b.id || ''));
+            });
+            return general[0] || null;
+        }
+
+        function profilePrimaryInstrumentLabel(profile) {
+            const row = primaryAssignmentRow(profile);
+            if (row) return assignmentRowLabel({ ...row, concert_set: null });
+            const legacy = (profile?.instrument || '').trim();
+            if (legacy && legacy !== 'Μη ορισμένο') return legacy;
+            return '';
+        }
+
+        function attendanceInstrumentSuffix(profile) {
+            const label = profilePrimaryInstrumentLabel(profile);
+            return label ? ` (${label})` : '';
+        }
+
+        async function loadProfilesWithAssignments() {
+            const [{ data: profiles, error: profilesError }, { data: rows }] = await Promise.all([
+                supabaseClient.from('profiles').select('id, email, first_name, last_name, instrument, role'),
+                supabaseClient.from('user_instruments').select('id, user_id, instrument_id, part_position, concert_set, created_at, instruments(name, is_section, is_percussion)')
+            ]);
+            assignmentDirectory = rows || [];
+            const byUser = {};
+            (rows || []).forEach(row => {
+                if (!byUser[row.user_id]) byUser[row.user_id] = [];
+                byUser[row.user_id].push(row);
+            });
+            (profiles || []).forEach(profile => {
+                profile.assignments = byUser[profile.id] || [];
+            });
+            return { profiles: profiles || [], error: profilesError };
+        }
+
         function getGreekVocativeName(name) {
             const trimmedName = (name || '').trim();
             if (!trimmedName) return 'μουσικέ';
@@ -3063,9 +3103,7 @@
                 if (!events || events.length === 0) {
                     html += `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">Δεν υπάρχουν εκδηλώσεις.</div>`;
                 } else {
-                    const { data: profiles, error: profilesError } = await supabaseClient
-                        .from('profiles')
-                        .select('email, first_name, last_name, instrument, role');
+                    const { profiles, error: profilesError } = await loadProfilesWithAssignments();
                     if (profilesError) {
                         console.error('Αδυναμία φόρτωσης προφίλ για τις παρουσίες:', profilesError);
                     }
@@ -3140,7 +3178,7 @@
                                         ${goingList.length === 0 ? '<span class="text-slate-500 italic">Καμία δήλωση</span>' :
                                           goingList.map(r => {
                                             const profile = profilesByEmail.get(String(r.user_email || '').trim().toLowerCase());
-                                            const instrument = profile?.instrument ? ` (${profile.instrument})` : '';
+                                            const instrument = attendanceInstrumentSuffix(profile);
                                             return `<div class="text-slate-300 mb-1">• ${escapeHtml(personName(r.user_email, profile))}${escapeHtml(instrument)}${staffRsvpBtns(r.user_email, 'Going')}</div>`;
                                           }).join('')}
                                     </div>
@@ -3149,7 +3187,7 @@
                                         ${notGoingList.length === 0 ? '<span class="text-slate-500 italic">Κανένας</span>' :
                                           notGoingList.map(r => {
                                             const profile = profilesByEmail.get(String(r.user_email || '').trim().toLowerCase());
-                                            const instrument = profile?.instrument ? ` (${profile.instrument})` : '';
+                                            const instrument = attendanceInstrumentSuffix(profile);
                                             return `<div class="text-slate-300 mb-1">• <b>${escapeHtml(personName(r.user_email, profile))}${escapeHtml(instrument)}</b><br><span class="text-[10px] text-slate-400 italic">"${escapeHtml(r.excuse || 'Χωρίς αιτιολογία')}"</span>${staffRsvpBtns(r.user_email, 'Not Going')}</div>`;
                                           }).join('')}
                                     </div>
@@ -3158,7 +3196,7 @@
                                     <span class="text-slate-300 font-semibold block mb-1">Χωρίς δήλωση (${pendingList.length})</span>
                                     ${pendingList.length === 0 ? '<span class="text-slate-500 italic">Κανείς</span>' :
                                       pendingList.map(profile => {
-                                        const instrument = profile.instrument ? ` (${profile.instrument})` : '';
+                                        const instrument = attendanceInstrumentSuffix(profile);
                                         return `<div class="text-slate-300 mb-1">• ${escapeHtml(personName(profile.email, profile))}${escapeHtml(instrument)}${staffRsvpBtns(profile.email, null)}</div>`;
                                       }).join('')}
                                 </div>`;
@@ -3169,7 +3207,7 @@
                                     ${[...musicianProfiles].sort((a, b) => `${a.last_name || ''} ${a.first_name || ''}`.localeCompare(`${b.last_name || ''} ${b.first_name || ''}`, 'el', { sensitivity: 'base' })).map(profile => {
                                         const email = String(profile.email || '').trim().toLowerCase();
                                         const row = responseByEmail.get(email);
-                                        const instrument = profile.instrument ? ` (${profile.instrument})` : '';
+                                        const instrument = attendanceInstrumentSuffix(profile);
                                         return `<div class="border-t border-slate-800 py-1.5 first:border-0">
                                             <div class="text-slate-200">${escapeHtml(personName(email, profile))}${escapeHtml(instrument)}</div>
                                             <div class="text-[10px] text-slate-500">Δήλωση: ${escapeHtml(rsvpLabel(row))}</div>
@@ -3889,9 +3927,9 @@
                 return;
             }
 
-            const [{ data: events }, { data: profiles }, { data: responses }] = await Promise.all([
+            const [{ data: events }, { profiles }, { data: responses }] = await Promise.all([
                 supabaseClient.from('band_events').select('id, event_name, event_type, date, time'),
-                supabaseClient.from('profiles').select('email, first_name, last_name, instrument, role'),
+                loadProfilesWithAssignments(),
                 supabaseClient.from('event_responses').select('event_id, user_email, status, excuse, actual_attendance')
             ]);
 
@@ -3966,7 +4004,7 @@
                         ev.date ? String(ev.date).split('T')[0] : '',
                         formatEventTime(ev.time),
                         musicianFullName(p, email),
-                        p.instrument || '',
+                        profilePrimaryInstrumentLabel(p),
                         rsvpStatusLabel(row?.status),
                         row?.excuse || '',
                         actualAttendanceLabel(row?.actual_attendance)
