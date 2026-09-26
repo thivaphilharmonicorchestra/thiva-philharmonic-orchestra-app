@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'thiva-philharmonic-v64';
+const CACHE_VERSION = 'thiva-philharmonic-v65';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 
 const STATIC_ASSETS = [
