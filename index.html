@@ -1116,10 +1116,48 @@
             return serviceWorkerRegistration;
         }
 
+        async function readyPushRegistration() {
+            const registered = await registerServiceWorker();
+            if (!registered) return null;
+            return navigator.serviceWorker.ready;
+        }
+
+        function isIosDevice() {
+            return /iPad|iPhone|iPod/.test(navigator.userAgent)
+                || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        }
+
+        function isStandalonePwa() {
+            return window.matchMedia('(display-mode: standalone)').matches
+                || window.navigator.standalone === true;
+        }
+
+        function pushSubscribeBlockedReason() {
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+                return 'Οι ειδοποιήσεις δεν υποστηρίζονται από αυτό το πρόγραμμα περιήγησης.';
+            }
+            if (isIosDevice() && /CriOS|FxiOS|EdgiOS|OPiOS/.test(navigator.userAgent)) {
+                return 'Στο iPhone οι ειδοποιήσεις δουλεύουν μόνο από Safari, με την εφαρμογή στην οθόνη Αφετηρίας (Προσθήκη στην Οθόνη Αφετηρίας).';
+            }
+            if (isIosDevice() && !isStandalonePwa()) {
+                return 'Στο iPhone ανοίξτε την εφαρμογή από την οθόνη Αφετηρίας (Safari → Κοινή χρήση → Προσθήκη στην Οθόνη Αφετηρίας) και ενεργοποιήστε τις ειδοποιήσεις εκεί.';
+            }
+            return '';
+        }
+
+        function explainPushSubscribeError(error) {
+            const name = error?.name || '';
+            const msg = String(error?.message || error || '');
+            if (/push service error|Registration failed/i.test(msg) || name === 'AbortError') {
+                return 'Ο browser δεν μπόρεσε να μιλήσει στην υπηρεσία ειδοποιήσεων (όχι η βάση της ορχήστρας). Συχνά φταίει Chrome/Brave χωρίς υπηρεσίες Google, ή προσωρινό σφάλμα του Google. Κλείστε την εφαρμογή, ανοίξτε την ξανά και δοκιμάστε. Στο iPhone χρησιμοποιήστε Safari από την οθόνη Αφετηρίας.';
+            }
+            return msg;
+        }
+
         async function initPushSupport() {
             if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
             try {
-                const reg = await registerServiceWorker();
+                const reg = await readyPushRegistration();
                 if (!reg) return;
                 const sub = await reg.pushManager.getSubscription();
                 pushSubscription = localStorage.getItem(PUSH_OPT_KEY) === '0' ? null : sub;
@@ -3769,9 +3807,31 @@
             button.setAttribute('aria-checked', on ? 'true' : 'false');
         }
 
+        async function subscribeToPushService(reg, appKey) {
+            const options = {
+                userVisibleOnly: true,
+                applicationServerKey: new Uint8Array(appKey)
+            };
+            const existingSub = await reg.pushManager.getSubscription();
+            if (existingSub) return existingSub;
+            try {
+                return await reg.pushManager.subscribe(options);
+            } catch (firstError) {
+                const stale = await reg.pushManager.getSubscription();
+                if (stale) await stale.unsubscribe().catch(() => {});
+                try {
+                    const ready = await navigator.serviceWorker.ready;
+                    return await ready.pushManager.subscribe(options);
+                } catch {
+                    throw firstError;
+                }
+            }
+        }
+
         async function enablePushNotifications() {
-            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-                showAppNotice('Οι ειδοποιήσεις δεν υποστηρίζονται από αυτό το πρόγραμμα περιήγησης.');
+            const blocked = pushSubscribeBlockedReason();
+            if (blocked) {
+                showAppNotice(blocked);
                 return;
             }
 
@@ -3783,7 +3843,7 @@
 
             setPushSwitchState(true);
             try {
-                const reg = await registerServiceWorker();
+                const reg = await readyPushRegistration();
                 if (!reg) throw new Error('Δεν ήταν δυνατή η ενεργοποίηση του Service Worker.');
                 const permission = await Notification.requestPermission();
                 if (permission !== 'granted') {
@@ -3793,11 +3853,7 @@
                     return;
                 }
 
-                const existingSub = await reg.pushManager.getSubscription();
-                pushSubscription = existingSub || await reg.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: appKey
-                });
+                pushSubscription = await subscribeToPushService(reg, appKey);
                 localStorage.setItem(PUSH_OPT_KEY, '1');
 
                 const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
@@ -3822,7 +3878,7 @@
                 pushSubscription = null;
                 localStorage.setItem(PUSH_OPT_KEY, '0');
                 setPushSwitchState(false);
-                showAppNotice('Σφάλμα ενεργοποίησης ειδοποιήσεων: ' + e.message);
+                showAppNotice('Σφάλμα ενεργοποίησης ειδοποιήσεων: ' + explainPushSubscribeError(e));
             }
         }
 
