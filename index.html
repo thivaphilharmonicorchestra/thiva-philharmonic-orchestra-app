@@ -1210,15 +1210,27 @@
         }
 
         function isAdminRole() {
-            return currentProfile?.role === 'admin';
+            return profileHasAdminRole(currentProfile);
         }
 
         function isConductorRole() {
-            const role = String(currentProfile?.role || '')
+            return profileHasConductorRole(currentProfile);
+        }
+
+        function foldedProfileRole(profile) {
+            return String(profile?.role || '')
                 .normalize('NFD')
                 .replace(/\p{M}/gu, '')
                 .toLowerCase()
                 .trim();
+        }
+
+        function profileHasAdminRole(profile) {
+            return foldedProfileRole(profile) === 'admin';
+        }
+
+        function profileHasConductorRole(profile) {
+            const role = foldedProfileRole(profile);
             return role === 'conductor' || role === 'μαεστρος' || role === 'maestro';
         }
 
@@ -1333,6 +1345,8 @@
         function profilePrimaryInstrumentLabel(profile) {
             const row = primaryAssignmentRow(profile);
             if (row) return assignmentRowLabel({ ...row, concert_set: null });
+            if (profileHasConductorRole(profile)) return 'Μαέστρος';
+            if (profileHasAdminRole(profile)) return 'Διαχειριστής';
             const legacy = (profile?.instrument || '').trim();
             if (legacy && legacy !== 'Μη ορισμένο') return legacy;
             return '';
@@ -4037,7 +4051,10 @@
             const firstName = currentProfile?.first_name || currentProfile?.name || '';
             const lastName = currentProfile?.last_name || '';
             const instrument = assignmentLabels().join(', ')
-                || (isConductorRole() ? '—' : (currentProfile?.instrument || 'Μη ορισμένο'));
+                || (isConductorRole() ? 'Μαέστρος' : '')
+                || (isAdminRole() ? 'Διαχειριστής' : '')
+                || (currentProfile?.instrument && currentProfile.instrument !== 'Μη ορισμένο' ? currentProfile.instrument : '')
+                || 'Μη ορισμένο';
 
             const pushSupported = ('serviceWorker' in navigator) && ('PushManager' in window);
             const pushActive = !!pushSubscription;
