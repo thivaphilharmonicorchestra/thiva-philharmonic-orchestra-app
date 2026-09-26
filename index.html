@@ -4160,6 +4160,31 @@
 
             return `
                 <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4">
+                    <h3 class="text-sm font-bold text-indigo-300 mb-1">Διαχειριστής: Νέο μέλος</h3>
+                    <p class="text-[11px] text-slate-400 mb-3">Ένα άτομο, μία φόρμα. Μετά την αποθήκευση, στείλτε πρόσκληση από Supabase → Authentication → Users → Invite με το ίδιο email.</p>
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                        <input type="text" id="nm-first" placeholder="Όνομα" class="p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">
+                        <input type="text" id="nm-last" placeholder="Επώνυμο" class="p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">
+                    </div>
+                    <input type="email" id="nm-email" placeholder="Email" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                        <select id="nm-role" class="p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">
+                            <option value="musician">Μουσικός</option>
+                            <option value="conductor">Μαέστρος</option>
+                            <option value="admin">Διαχειριστής</option>
+                        </select>
+                        <label class="flex items-center gap-2 text-[11px] text-slate-300 px-1">
+                            <input type="checkbox" id="nm-beginner" class="rounded border-slate-600"> Μαθητής
+                        </label>
+                    </div>
+                    <select id="nm-instrument" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">
+                        <option value="">Χωρίς όργανο (π.χ. μαέστρος)</option>
+                        ${instrumentOptions}
+                    </select>
+                    <select id="nm-part" class="w-full mb-3 p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white"></select>
+                    <button type="button" id="nm-add" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded-lg text-xs font-semibold">Προσθήκη μέλους</button>
+                </div>
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4">
                     <h3 class="text-sm font-bold text-indigo-300 mb-1">Διαχειριστής: Αναθέσεις οργάνων</h3>
                     <p class="text-[11px] text-slate-400 mb-3">Όργανο και μέρος (π.χ. Alto Sax 2). Αφήστε το σετ κενό για όλες τις συναυλίες. Αν συμπληρώσετε σετ, για εκείνο το σετ βλέπουν μόνο τις αναθέσεις με αυτό το όνομα σετ — όχι τα γενικά όργανα.</p>
                     <select id="asg-user" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">${personOptions}</select>
@@ -4175,25 +4200,82 @@
         }
 
         function refreshAdminPartSelect() {
-            const instrumentSelect = document.getElementById('asg-instrument');
-            const partSelect = document.getElementById('asg-part');
+            fillPartSelect('asg-instrument', 'asg-part');
+        }
+
+        function refreshNewMemberPartSelect() {
+            fillPartSelect('nm-instrument', 'nm-part');
+        }
+
+        function fillPartSelect(instrumentSelectId, partSelectId) {
+            const instrumentSelect = document.getElementById(instrumentSelectId);
+            const partSelect = document.getElementById(partSelectId);
             if (!instrumentSelect || !partSelect) return;
             const selected = (window.adminAssignmentInstruments || []).find(ins => ins.id === instrumentSelect.value);
             const maxParts = selected ? Number(selected.max_regular_parts) : 1;
             let options = '<option value="">Χωρίς αριθμό μέρους</option>';
-            for (let n = 1; n <= maxParts; n += 1) options += `<option value="${n}">Μέρος ${n}</option>`;
+            if (instrumentSelect.value) {
+                for (let n = 1; n <= maxParts; n += 1) options += `<option value="${n}">Μέρος ${n}</option>`;
+            }
             partSelect.innerHTML = options;
         }
 
         function bindAdminAssignmentPanel() {
             refreshAdminPartSelect();
+            refreshNewMemberPartSelect();
             const instrumentSelect = document.getElementById('asg-instrument');
             if (instrumentSelect) instrumentSelect.addEventListener('change', refreshAdminPartSelect);
+            const newMemberInstrument = document.getElementById('nm-instrument');
+            if (newMemberInstrument) newMemberInstrument.addEventListener('change', refreshNewMemberPartSelect);
             const addBtn = document.getElementById('asg-add');
             if (addBtn) addBtn.addEventListener('click', addInstrumentAssignment);
+            const addMemberBtn = document.getElementById('nm-add');
+            if (addMemberBtn) addMemberBtn.addEventListener('click', addRosterPerson);
             document.querySelectorAll('[data-del-assign]').forEach(btn => {
                 btn.addEventListener('click', () => deleteInstrumentAssignment(btn.getAttribute('data-del-assign')));
             });
+        }
+
+        async function addRosterPerson() {
+            if (!isAdminRole()) return;
+            const firstName = (document.getElementById('nm-first')?.value || '').trim();
+            const lastName = (document.getElementById('nm-last')?.value || '').trim();
+            const email = (document.getElementById('nm-email')?.value || '').trim();
+            const role = document.getElementById('nm-role')?.value || 'musician';
+            const isBeginner = !!document.getElementById('nm-beginner')?.checked;
+            const instrumentId = document.getElementById('nm-instrument')?.value || '';
+            const partRaw = document.getElementById('nm-part')?.value || '';
+            if (!firstName || !lastName || !email || !email.includes('@')) {
+                showAppNotice('Συμπληρώστε όνομα, επώνυμο και έγκυρο email.');
+                return;
+            }
+            const { data: created, error: profileError } = await supabaseClient.from('profiles').insert([{
+                email,
+                first_name: firstName,
+                last_name: lastName,
+                role,
+                instrument: 'Μη ορισμένο',
+                is_beginner: isBeginner
+            }]).select('id').maybeSingle();
+            if (profileError) {
+                showAppNotice(profileError.message);
+                return;
+            }
+            if (instrumentId && created?.id) {
+                const { error: assignError } = await supabaseClient.from('user_instruments').insert([{
+                    user_id: created.id,
+                    instrument_id: instrumentId,
+                    part_position: partRaw ? Number(partRaw) : null,
+                    concert_set: null
+                }]);
+                if (assignError) {
+                    showAppNotice('Το προφίλ δημιουργήθηκε, αλλά η ανάθεση οργάνου απέτυχε: ' + assignError.message);
+                    renderProfileTab();
+                    return;
+                }
+            }
+            showAppNotice('Το μέλος αποθηκεύτηκε. Στείλτε πρόσκληση από Authentication → Users → Invite με το ίδιο email.');
+            renderProfileTab();
         }
 
         async function addInstrumentAssignment() {
