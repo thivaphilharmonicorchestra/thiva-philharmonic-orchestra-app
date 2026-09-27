@@ -129,11 +129,12 @@
         #score-stage.pdf-resizing {
             transition: none;
         }
-        #pdf-loading-cover {
-            position: absolute;
-            inset: 0;
-            z-index: 25;
-            background: #020617;
+        #pdf-viewer-container.pdf-readonly .annotation-island,
+        #pdf-viewer-container.pdf-readonly #annotation-options {
+            display: none !important;
+        }
+        #pdf-viewer-container.pdf-readonly #draw-canvas {
+            pointer-events: none;
         }
         #viewer-notice {
             white-space: nowrap;
@@ -382,7 +383,7 @@
             'localhost',
             '127.0.0.1'
         ];
-        const OFFICIAL_APP_ORIGIN = 'https://thivaphilharmonicorchestra.github.io/thiva-philharmonic-orchestra-app/';
+        const INTERNAL_DOCS_BUCKET = 'internal-docs';
         const AUTH_IDB_NAME = 'thiva-philharmonic-auth';
         const PUSH_OPT_KEY = 'thiva-push-opt-in';
         const AUTH_IDB_DUMP_KEY = 'auth-dump';
@@ -682,6 +683,7 @@
         let annotationsDirty = false;
         let viewerHistoryActive = false;
         let pdfViewerClosing = false;
+        let pdfReadOnly = false;
         let currentTool = 'hand';
         const annotationSettings = {
             pen: { color: '#111827', width: 3.5 },
@@ -2331,18 +2333,23 @@
             document.getElementById('pdf-loading-cover')?.classList.toggle('hidden', !visible);
         }
 
-        async function openPdfViewer(pdfUrl, pieceId) {
+        async function openPdfViewer(pdfUrl, pieceId, options = {}) {
             if (!viewerHistoryActive) {
                 history.pushState({ ...(history.state || {}), pdfViewer: true }, '');
                 viewerHistoryActive = true;
             }
+            pdfReadOnly = !!options.readOnly;
             activePieceId = pieceId;
             pageNum = 1;
             annotationsDirty = false;
             wipeViewerSurfaces();
             setPdfLoadingCover(true);
-            document.getElementById('pdf-viewer-container').classList.remove('hidden');
-            document.getElementById('pdf-viewer-container').classList.remove('reader-mode');
+            const viewer = document.getElementById('pdf-viewer-container');
+            viewer.classList.remove('hidden');
+            viewer.classList.remove('reader-mode');
+            viewer.classList.toggle('pdf-readonly', pdfReadOnly);
+            const closeBtn = viewer.querySelector('button[onclick="closePdfViewer()"]');
+            if (closeBtn) closeBtn.setAttribute('aria-label', pdfReadOnly ? 'Κλείσιμο εγγράφου' : 'Κλείσιμο παρτιτούρας');
             document.documentElement.classList.add('pdf-open');
             updateViewerToggleIcon(false);
             setViewportMeta(true);
@@ -2359,7 +2366,7 @@
                 const loadingTask = pdfjsLib.getDocument(pdfUrl);
                 pdfDoc = await loadingTask.promise;
                 await renderPage(pageNum);
-                await loadSavedAnnotations();
+                if (!pdfReadOnly) await loadSavedAnnotations();
                 setPdfLoadingCover(false);
                 requestAnimationFrame(() => schedulePdfRefit());
             } catch (error) {
@@ -2368,12 +2375,104 @@
             }
         }
 
+        function regulationsDateFromName(name) {
+            const matches = String(name || '').match(/\d{4}-\d{2}-\d{2}/g);
+            return matches ? matches[matches.length - 1] : '';
+        }
+
+        function athensIsoDate(date = new Date()) {
+            return new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'Europe/Athens',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            }).format(date);
+        }
+
+        function safeInternalDocFileName(original) {
+            let base = String(original || 'kanonismos.pdf').split(/[/\\]/).pop();
+            base = base.replace(/[^\w.\-]+/g, '_');
+            if (!/\.pdf$/i.test(base)) base += '.pdf';
+            if (!regulationsDateFromName(base)) {
+                base = base.replace(/\.pdf$/i, '') + '_' + athensIsoDate() + '.pdf';
+            }
+            return base.slice(0, 180);
+        }
+
+        async function getLatestInternalRegulations() {
+            const { data, error } = await supabaseClient.storage
+                .from(INTERNAL_DOCS_BUCKET)
+                .list('', { limit: 100, sortBy: { column: 'name', order: 'desc' } });
+            if (error) return { error, file: null };
+            const pdfs = (data || []).filter((entry) => entry?.name && /\.pdf$/i.test(entry.name));
+            pdfs.sort((a, b) => {
+                const dateA = regulationsDateFromName(a.name);
+                const dateB = regulationsDateFromName(b.name);
+                if (dateA && dateB && dateA !== dateB) return dateB.localeCompare(dateA);
+                if (dateA && !dateB) return -1;
+                if (!dateA && dateB) return 1;
+                return String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || ''));
+            });
+            const file = pdfs[0] || null;
+            return {
+                error: null,
+                file,
+                path: file?.name || '',
+                date: file ? (regulationsDateFromName(file.name) || '') : ''
+            };
+        }
+
+        async function openInternalRegulations() {
+            const latest = await getLatestInternalRegulations();
+            if (latest.error || !latest.path) {
+                showAppNotice('Σφάλμα πρόσβασης στον κανονισμό: ' + (latest.error?.message || 'Το αρχείο δεν βρέθηκε.'));
+                return;
+            }
+            const { data, error } = await supabaseClient.storage
+                .from(INTERNAL_DOCS_BUCKET)
+                .createSignedUrl(latest.path, 60);
+            if (error || !data?.signedUrl) {
+                showAppNotice('Σφάλμα πρόσβασης στον κανονισμό: ' + (error?.message || 'Το αρχείο δεν βρέθηκε.'));
+                return;
+            }
+            return openPdfViewer(data.signedUrl, 'internal-regulations', { readOnly: true });
+        }
+
+        async function uploadInternalRegulations(event) {
+            if (!isAdminRole()) {
+                showAppNotice('Μόνο οι διαχειριστές μπορούν να ενημερώσουν τον κανονισμό.');
+                return;
+            }
+            const input = event?.target;
+            const file = input?.files?.[0];
+            if (input) input.value = '';
+            if (!file) return;
+            const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+            if (!isPdf) {
+                showAppNotice('Επιλέξτε αρχείο PDF.');
+                return;
+            }
+            const path = safeInternalDocFileName(file.name);
+            const { error } = await supabaseClient.storage
+                .from(INTERNAL_DOCS_BUCKET)
+                .upload(path, file, {
+                    upsert: true,
+                    contentType: 'application/pdf'
+                });
+            if (error) {
+                showAppNotice('Σφάλμα αποθήκευσης κανονισμού: ' + error.message);
+                return;
+            }
+            showAppNotice('Ο εσωτερικός κανονισμός ενημερώθηκε.');
+            renderProfileTab();
+        }
+
         async function closePdfViewer(fromHistory = false) {
             const viewer = document.getElementById('pdf-viewer-container');
             if (!viewer || viewer.classList.contains('hidden') || pdfViewerClosing) return;
             pdfViewerClosing = true;
             try {
-                if (annotationsDirty) {
+                if (annotationsDirty && !pdfReadOnly) {
                     const shouldSave = await confirmDiscardAnnotations();
                     if (shouldSave) persistAnnotations();
                     else annotationsDirty = false;
@@ -2392,6 +2491,8 @@
                 await exitPdfFullscreen();
                 setViewportMeta(false);
                 viewer.classList.add('hidden');
+                viewer.classList.remove('pdf-readonly');
+                pdfReadOnly = false;
                 pdfDoc = null;
                 pageNum = 1;
                 activePieceId = null;
@@ -2906,6 +3007,7 @@
         }
 
         function startDraw(e) {
+            if (pdfReadOnly) return;
             annotationHistory.push(getAnnotationSnapshot());
             if (annotationHistory.length > 30) annotationHistory.shift();
             annotationRedoHistory = [];
@@ -2936,6 +3038,7 @@
         }
 
         function setTool(tool) {
+            if (pdfReadOnly) tool = 'hand';
             currentTool = tool;
             ['hand', 'pen', 'highlighter', 'eraser'].forEach(name => {
                 const button = document.getElementById(`tool-${name}`);
@@ -4253,6 +4356,10 @@
         async function renderProfileTab() {
             const content = document.getElementById('content');
             const roleDisplay = isAdminRole() ? 'Διαχειριστής' : (isConductorRole() ? 'Μαέστρος' : 'Μουσικός');
+            const latestRegulations = await getLatestInternalRegulations();
+            const regulationsTitle = latestRegulations.date
+                ? `Εσωτερικός Κανονισμός Φιλαρμονικής (${latestRegulations.date})`
+                : 'Εσωτερικός Κανονισμός Φιλαρμονικής';
             
             const firstName = currentProfile?.first_name || currentProfile?.name || '';
             const lastName = currentProfile?.last_name || '';
@@ -4315,6 +4422,16 @@
                         <span class="inline-block mt-1 uppercase text-xs bg-slate-900 px-2.5 py-1 rounded text-emerald-400 font-medium">${roleDisplay}</span>
                     </div>
                 </div>
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4">
+                    <button type="button" onclick="openInternalRegulations()" class="w-full text-left">
+                        <h3 class="text-sm font-bold text-indigo-300">📄 ${escapeHtml(regulationsTitle)}</h3>
+                        <p class="text-[11px] text-slate-400 mt-1">Άνοιγμα του κανονισμού της φιλαρμονικής. Μόνο ανάγνωση.</p>
+                    </button>
+                    ${isAdminRole() ? `
+                    <input type="file" id="regulations-file" accept="application/pdf" class="hidden">
+                    <button type="button" onclick="document.getElementById('regulations-file').click()" class="mt-3 w-full bg-slate-900 hover:bg-slate-700 border border-slate-600 text-white py-2.5 rounded-lg text-xs font-semibold transition">Αντικατάσταση PDF</button>
+                    ` : ''}
+                </div>
                 ${pushSection}
                 <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4">
                     <h3 class="text-sm font-bold text-indigo-300 mb-1">Κωδικός πρόσβασης</h3>
@@ -4324,7 +4441,10 @@
                 ${adminAssignmentsHtml}
                 <button onclick="handleLogout()" class="w-full bg-red-600/80 hover:bg-red-600 text-white font-semibold p-3 rounded-lg transition text-sm">Αποσύνδεση</button>
             `;
-            if (isAdminRole()) bindAdminAssignmentPanel();
+            if (isAdminRole()) {
+                bindAdminAssignmentPanel();
+                document.getElementById('regulations-file')?.addEventListener('change', uploadInternalRegulations);
+            }
         }
 
         async function buildAdminAssignmentPanel() {
