@@ -570,6 +570,21 @@
             setTimeout(() => el.remove(), 4000);
         }
 
+        function showAppStepsDialog(message) {
+            document.getElementById('app-steps')?.remove();
+            const dialog = document.createElement('div');
+            dialog.id = 'app-steps';
+            dialog.className = 'fixed inset-0 z-[10002] bg-black/60 flex items-center justify-center p-4';
+            dialog.innerHTML = `
+                <div class="bg-slate-800 border border-slate-600 rounded-2xl p-4 w-full max-w-sm max-h-[85vh] flex flex-col">
+                    <p class="text-sm text-slate-100 whitespace-pre-wrap text-left leading-relaxed overflow-y-auto mb-4"></p>
+                    <button type="button" id="app-steps-ok" class="py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold">Εντάξει</button>
+                </div>`;
+            dialog.querySelector('p').textContent = message;
+            document.body.appendChild(dialog);
+            dialog.querySelector('#app-steps-ok').onclick = () => dialog.remove();
+        }
+
         function confirmAppAction(message) {
             return new Promise((resolve) => {
                 document.getElementById('app-confirm')?.remove();
@@ -1122,16 +1137,6 @@
             return navigator.serviceWorker.ready;
         }
 
-        function isIosDevice() {
-            return /iPad|iPhone|iPod/.test(navigator.userAgent)
-                || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-        }
-
-        function isStandalonePwa() {
-            return window.matchMedia('(display-mode: standalone)').matches
-                || window.navigator.standalone === true;
-        }
-
         function pushSubscribeBlockedReason() {
             if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
                 return 'Οι ειδοποιήσεις δεν υποστηρίζονται από αυτό το πρόγραμμα περιήγησης.';
@@ -1139,19 +1144,63 @@
             if (isIosDevice() && /CriOS|FxiOS|EdgiOS|OPiOS/.test(navigator.userAgent)) {
                 return 'Στο iPhone οι ειδοποιήσεις δουλεύουν μόνο από Safari, με την εφαρμογή στην οθόνη Αφετηρίας (Προσθήκη στην Οθόνη Αφετηρίας).';
             }
-            if (isIosDevice() && !isStandalonePwa()) {
+            if (isIosDevice() && !isStandaloneDisplay()) {
                 return 'Στο iPhone ανοίξτε την εφαρμογή από την οθόνη Αφετηρίας (Safari → Κοινή χρήση → Προσθήκη στην Οθόνη Αφετηρίας) και ενεργοποιήστε τις ειδοποιήσεις εκεί.';
             }
             return '';
         }
 
-        function explainPushSubscribeError(error) {
+        function isPushServiceError(error) {
             const name = error?.name || '';
             const msg = String(error?.message || error || '');
-            if (/push service error|Registration failed/i.test(msg) || name === 'AbortError') {
-                return 'Ο browser δεν μπόρεσε να μιλήσει στην υπηρεσία ειδοποιήσεων (όχι η βάση της ορχήστρας). Συχνά φταίει Chrome/Brave χωρίς υπηρεσίες Google, ή προσωρινό σφάλμα του Google. Κλείστε την εφαρμογή, ανοίξτε την ξανά και δοκιμάστε. Στο iPhone χρησιμοποιήστε Safari από την οθόνη Αφετηρίας.';
+            return /push service error|Registration failed/i.test(msg) || name === 'AbortError';
+        }
+
+        function isPhoneOrTablet() {
+            return isIosDevice() || isAndroidDevice();
+        }
+
+        function pushSubscribeHelpMessage() {
+            const title = 'Σφάλμα ενεργοποίησης ειδοποιήσεων.';
+            if (!isPhoneOrTablet()) {
+                return [
+                    title,
+                    '',
+                    'Οι ειδοποιήσεις της εφαρμογής προορίζονται για το τηλέφωνο ή το τάμπλετ. Εγκαταστήστε την εκεί, ανοίξτε την από το εικονίδιο και ενεργοποιήστε τις ειδοποιήσεις μέσα στην εφαρμογή.'
+                ].join('\n');
             }
-            return msg;
+            if (isStandaloneDisplay()) {
+                if (isIosDevice()) {
+                    return [
+                        title,
+                        '',
+                        '1. Ρυθμίσεις της συσκευής → Ειδοποιήσεις → Φιλαρμονική: κλείστε τις ειδοποιήσεις και ανοίξτε τις ξανά.',
+                        '2. Επιστρέψτε στην εφαρμογή και ενεργοποιήστε τις ειδοποιήσεις ξανά.'
+                    ].join('\n');
+                }
+                return [
+                    title,
+                    '',
+                    '1. Ρυθμίσεις της συσκευής → Εφαρμογές → αυτή η εφαρμογή ή Chrome → Ειδοποιήσεις: κλείστε τις, περιμένετε λίγο, ανοίξτε τις ξανά.',
+                    '2. Επιστρέψτε στην εφαρμογή και ενεργοποιήστε τις ειδοποιήσεις ξανά.'
+                ].join('\n');
+            }
+            if (isIosDevice()) {
+                return [
+                    title,
+                    '',
+                    '1. Η εφαρμογή πρέπει να είναι στην οθόνη Αφετηρίας. Στο Safari: Κοινοποίηση → Προσθήκη στην οθόνη Αφετηρίας. Ανοίξτε την μόνο από το εικονίδιο, όχι από καρτέλα.',
+                    '2. Ρυθμίσεις της συσκευής → Ειδοποιήσεις → Φιλαρμονική: κλείστε τις ειδοποιήσεις και ανοίξτε τις ξανά.',
+                    '3. Μέσα στην εγκατεστημένη εφαρμογή, ενεργοποιήστε τις ειδοποιήσεις ξανά.'
+                ].join('\n');
+            }
+            return [
+                title,
+                '',
+                '1. Η εφαρμογή πρέπει να είναι εγκατεστημένη. Στο Chrome: μενού ⋮ → Εγκατάσταση εφαρμογής ή Προσθήκη στην αρχική οθόνη. Ανοίξτε την μόνο από το εικονίδιο, όχι από καρτέλα.',
+                '2. Ρυθμίσεις της συσκευής → Εφαρμογές → αυτή η εφαρμογή ή Chrome → Ειδοποιήσεις: κλείστε τις, περιμένετε λίγο, ανοίξτε τις ξανά.',
+                '3. Μέσα στην εγκατεστημένη εφαρμογή, ενεργοποιήστε τις ειδοποιήσεις ξανά.'
+            ].join('\n');
         }
 
         async function initPushSupport() {
@@ -3878,7 +3927,8 @@
                 pushSubscription = null;
                 localStorage.setItem(PUSH_OPT_KEY, '0');
                 setPushSwitchState(false);
-                showAppNotice('Σφάλμα ενεργοποίησης ειδοποιήσεων: ' + explainPushSubscribeError(e));
+                if (isPushServiceError(e)) showAppStepsDialog(pushSubscribeHelpMessage());
+                else showAppNotice('Σφάλμα ενεργοποίησης ειδοποιήσεων: ' + (e.message || e));
             }
         }
 
