@@ -3,7 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>Φιλαρμονική Ορχήστρα Θήβας</title>
+    <!-- © Φιλαρμονική Ορχήστρα Θήβας. Source is not a licence to copy the orchestra’s data, name, or PDFs. -->
     
     <!-- PWA / Native App Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -374,6 +376,13 @@
     <script>
         const SUPABASE_URL = 'https://jigwfebaxiqumrltkgli.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_ORpUPeW5OSBOwTCTIKhPUw_SX8DtV9Z';
+        const OFFICIAL_APP_HOSTS = [
+            'thivaphilharmonicorchestra.github.io',
+            'thivaphilharmonic-maker.github.io',
+            'localhost',
+            '127.0.0.1'
+        ];
+        const OFFICIAL_APP_ORIGIN = 'https://thivaphilharmonicorchestra.github.io';
         const AUTH_IDB_NAME = 'thiva-philharmonic-auth';
         const PUSH_OPT_KEY = 'thiva-push-opt-in';
         const AUTH_IDB_DUMP_KEY = 'auth-dump';
@@ -1067,6 +1076,7 @@
             authReady = true;
 
             supabaseClient.auth.onAuthStateChange(async (event, nextSession) => {
+                if (blockUnofficialApp()) return;
                 if (!authReady && !nextSession) return;
                 if (event === 'PASSWORD_RECOVERY') {
                     requirePasswordSetup = true;
@@ -1094,6 +1104,8 @@
                     renderLogin();
                 }
             });
+
+            if (blockUnofficialApp()) return;
 
             if (session) {
                 currentUser = session.user;
@@ -1521,9 +1533,35 @@
             return trimmedName;
         }
 
+        function isOfficialAppHost() {
+            return OFFICIAL_APP_HOSTS.includes(location.hostname);
+        }
+
+        function unofficialAppMessage() {
+            return 'Αυτή δεν είναι η επίσημη εφαρμογή της Φιλαρμονικής. Μην εισάγετε κωδικό. Ανοίξτε μόνο την εφαρμογή από το εικονίδιο ή από ' + OFFICIAL_APP_ORIGIN;
+        }
+
+        function blockUnofficialApp() {
+            if (isOfficialAppHost()) return false;
+            currentUser = null;
+            currentProfile = null;
+            renderLogin();
+            return true;
+        }
+
         function renderLogin(message = '') {
             setAuthNarrow(true);
             document.getElementById('navbar').classList.add('hidden');
+            if (!isOfficialAppHost()) {
+                document.getElementById('content').innerHTML = `
+                    <div class="flex flex-col items-center justify-center min-h-[85vh] text-center px-4">
+                        <img src="${LOGO_URL}" alt="Logo" class="w-24 h-24 mb-4 object-contain drop-shadow-md">
+                        <h1 class="text-2xl font-bold text-red-300 mb-3">Μη επίσημη εφαρμογή</h1>
+                        <p class="text-slate-200 text-sm leading-relaxed">${escapeHtml(unofficialAppMessage())}</p>
+                    </div>
+                `;
+                return;
+            }
             document.getElementById('content').innerHTML = `
                 <div class="flex flex-col items-center justify-center min-h-[85vh] text-center">
                     <img src="${LOGO_URL}" alt="Logo" class="w-24 h-24 mb-4 object-contain drop-shadow-md">
@@ -1537,6 +1575,7 @@
                     </div>
                     <p id="error-msg" class="text-red-400 mt-4 text-sm">${escapeHtml(message)}</p>
                     <p id="info-msg" class="text-emerald-400 mt-2 text-sm"></p>
+                    <p class="text-[11px] text-slate-500 mt-6">Επίσημη εφαρμογή: ${escapeHtml(OFFICIAL_APP_ORIGIN)}</p>
                 </div>
             `;
         }
@@ -1604,6 +1643,10 @@
         }
 
         async function handleForgotPassword() {
+            if (!isOfficialAppHost()) {
+                renderLogin();
+                return;
+            }
             const email = (document.getElementById('email')?.value || '').trim();
             const errorEl = document.getElementById('error-msg');
             const infoEl = document.getElementById('info-msg');
@@ -1630,6 +1673,10 @@
         }
 
         async function handleLogin() {
+            if (!isOfficialAppHost()) {
+                renderLogin();
+                return;
+            }
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
             const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
@@ -1650,6 +1697,7 @@
         }
 
         async function renderApp() {
+            if (blockUnofficialApp()) return;
             setAuthNarrow(false);
             document.getElementById('navbar').classList.remove('hidden');
             ['music', 'events', 'home', 'attendance', 'profile'].forEach(t => {
