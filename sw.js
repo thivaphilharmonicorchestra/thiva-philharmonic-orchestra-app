@@ -1,128 +1,4527 @@
-const CACHE_VERSION = 'thiva-philharmonic-v71';
-const STATIC_CACHE = `${CACHE_VERSION}-static`;
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <title>Φιλαρμονική Ορχήστρα Θήβας</title>
+    <!-- © Φιλαρμονική Ορχήστρα Θήβας. Source is not a licence to copy the orchestra’s data, name, or PDFs. -->
+    
+    <!-- PWA / Native App Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Φιλαρμονική Θήβας">
+    <link rel="apple-touch-icon" href="./thiva_app_icon.png">
+    <link rel="manifest" href="./manifest.webmanifest">
 
-const STATIC_ASSETS = [
-    './',
-    './index.html',
-    './thiva_app_icon.png',
-    './thiva_app_icon_android.png',
-    './thiva_home_button.png',
-    './manifest.webmanifest',
-    'https://cdn.tailwindcss.com',
-    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4',
-    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
-    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
-    'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js',
-    'https://raw.githubusercontent.com/thivaphilharmonic-maker/thiva-philharmonic-orchestra-app/main/logo.png'
-];
-
-self.addEventListener('install', (event) => {
-    event.waitUntil(
-        caches.open(STATIC_CACHE).then((cache) => {
-            return cache.addAll(STATIC_ASSETS).catch(err => {
-                console.warn('Some static assets failed to cache:', err);
-                return Promise.all(STATIC_ASSETS.map(url =>
-                    cache.add(url).catch(e => console.warn('Skip:', url, e))
-                ));
-            });
-        }).then(() => self.skipWaiting())
-    );
-});
-
-self.addEventListener('activate', (event) => {
-    event.waitUntil(
-        caches.keys().then((keys) => {
-            return Promise.all(
-                keys.filter(k => !k.startsWith(CACHE_VERSION)).map(k => caches.delete(k))
-            );
-        }).then(() => self.clients.claim())
-    );
-});
-
-function isPdfRequest(url) {
-    return url.endsWith('.pdf') ||
-        (url.includes('supabase') && (url.includes('sheet-music') || url.includes('storage'))) ||
-        (url.includes('token=') && (url.includes('pdf') || url.includes('render')));
-}
-
-function isSupabaseApi(url) {
-    try {
-        return new URL(url).hostname.endsWith('supabase.co');
-    } catch {
-        return false;
-    }
-}
-
-function safeNotificationUrl(raw) {
-    const fallback = new URL('./index.html', self.registration.scope).href;
-    try {
-        const resolved = new URL(String(raw || ''), self.registration.scope);
-        if (resolved.origin !== self.location.origin) return fallback;
-        return resolved.href;
-    } catch {
-        return fallback;
-    }
-}
-
-self.addEventListener('fetch', (event) => {
-    const req = event.request;
-    const url = new URL(req.url);
-
-    if (req.method !== 'GET') return;
-
-    if (isPdfRequest(url.href) || (req.headers.get('accept') || '').includes('application/pdf') || isSupabaseApi(url.href)) {
-        return;
-    }
-
-    if (url.origin === location.origin || STATIC_ASSETS.includes(url.href) || STATIC_ASSETS.includes(url.pathname)) {
-        event.respondWith(
-            fetch(req).then((resp) => {
-                if (resp.ok) {
-                    caches.open(STATIC_CACHE).then(c => c.put(req, resp.clone())).catch(() => {});
-                }
-                return resp;
-            }).catch(() => caches.match(req).then(cached => cached || caches.match('./index.html')))
-        );
-        return;
-    }
-});
-
-self.addEventListener('push', (event) => {
-    let data = { title: 'Φιλαρμονική Ορχήστρα Θήβας', body: 'Νέα ανακοίνωση' };
-    try {
-        if (event.data) {
-            const parsed = event.data.json();
-            data = { ...data, ...parsed };
+    <!-- Tailwind CSS for modern mobile-first styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Supabase JavaScript Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    <meta name="theme-color" content="#1e293b">
+    <style>
+        .pdf-viewer-container, .modal-content {
+            width: 100vw;
+            height: 100vh;
+            position: fixed;
+            top: 0;
+            left: 0;
+            margin: 0;
+            padding: 0;
+            background: #1a1a1a;
+            z-index: 9999;
         }
-    } catch (e) {
-        if (event.data) data.body = event.data.text();
-    }
+        .pdf-viewer-container iframe, 
+        .pdf-viewer-container embed {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        .app-navbar {
+            bottom: max(10px, env(safe-area-inset-bottom));
+        }
+        .app-navbar::after {
+            content: '';
+            position: absolute;
+            z-index: 0;
+            top: 100%;
+            left: 0;
+            right: 0;
+            height: max(10px, env(safe-area-inset-bottom));
+            background: rgba(30, 41, 59, 0.95);
+            pointer-events: none;
+        }
+        html, body {
+            touch-action: manipulation;
+            overscroll-behavior: none;
+            height: 100%;
+            overflow: hidden;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+        }
+        body {
+            min-height: 100%;
+            min-height: 100dvh;
+        }
+        input, textarea, select {
+            -webkit-user-select: text;
+            user-select: text;
+            -webkit-touch-callout: default;
+        }
+        #app {
+            height: 100%;
+            max-height: 100dvh;
+            overflow: hidden;
+            min-height: 0;
+        }
+        #app,
+        #content {
+            overscroll-behavior: none;
+        }
+        #content {
+            min-height: 0;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        html.tablet-shell:not(.auth-narrow) #app,
+        html.tablet-shell:not(.auth-narrow) #navbar {
+            max-width: none;
+        }
+        html.auth-narrow #app {
+            max-width: 28rem;
+        }
+        #pdf-viewer-container {
+            touch-action: none;
+            width: 100%;
+            max-width: none;
+            padding-top: env(safe-area-inset-top, 0px);
+            box-sizing: border-box;
+        }
+        html.pdf-open,
+        html.pdf-open body {
+            overflow: hidden !important;
+        }
+        #pdf-viewer-container > .viewer-float:not(#viewer-show-controls) {
+            top: calc(env(safe-area-inset-top, 0px) + 12px);
+        }
+        #app,
+        #content {
+            overscroll-behavior-y: none;
+        }
+        #canvas-wrapper {
+            touch-action: manipulation;
+            overscroll-behavior: contain;
+            padding: 0;
+            align-items: flex-start;
+        }
+        #score-stage {
+            position: relative;
+            flex: 0 0 auto;
+            transform-origin: top center;
+            transition: transform 80ms ease-out;
+        }
+        #score-stage.pdf-resizing {
+            transition: none;
+        }
+        #pdf-loading-cover {
+            position: absolute;
+            inset: 0;
+            z-index: 25;
+            background: #020617;
+        }
+        #viewer-notice {
+            white-space: nowrap;
+            max-width: calc(100% - 24px);
+        }
+        .viewer-save-mark {
+            position: absolute;
+            inset: 0;
+            z-index: 55;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
+        .viewer-save-mark-box {
+            width: 72px;
+            height: 72px;
+            border-radius: 18px;
+            border: 2px solid rgba(255, 255, 255, 0.72);
+            background: rgba(15, 23, 42, 0.28);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: viewer-save-fade 1.35s ease forwards;
+        }
+        @keyframes viewer-save-fade {
+            0% { opacity: 0; transform: scale(0.92); }
+            14% { opacity: 1; transform: scale(1); }
+            62% { opacity: 1; transform: scale(1); }
+            100% { opacity: 0; transform: scale(0.98); }
+        }
+        #score-stage.score-spring-back {
+            transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+        .viewer-chrome {
+            transition: opacity 180ms ease, transform 180ms ease;
+        }
+        .page-indicator {
+            opacity: 0;
+            pointer-events: none;
+            background: rgba(15, 23, 42, 0.7);
+            border-color: rgba(71, 85, 105, 0.85);
+            transition: opacity 180ms ease;
+        }
+        .page-indicator.visible {
+            opacity: 1;
+        }
+        #pdf-viewer-container.reader-mode .viewer-chrome {
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(8px);
+        }
+        #pdf-viewer-container.reader-mode #viewer-show-controls {
+            opacity: 1;
+            pointer-events: auto;
+            transform: none;
+        }
+        #viewer-show-controls {
+            display: block;
+            bottom: max(12px, env(safe-area-inset-bottom));
+            top: auto;
+            right: 12px;
+            border-radius: 999px;
+            width: 42px;
+            height: 42px;
+            padding: 0;
+        }
+        .viewer-float {
+            position: absolute;
+            z-index: 30;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(71, 85, 105, 0.85);
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+        }
+        .annotation-island {
+            position: absolute;
+            z-index: 3;
+            left: 50%;
+            bottom: max(12px, env(safe-area-inset-bottom));
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 6px;
+            border-radius: 18px;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(71, 85, 105, 0.85);
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+        }
+        @media (orientation: portrait) and (max-width: 600px) {
+            .annotation-island {
+                transform: translateX(calc(-50% - 22px)) scale(0.92);
+                transform-origin: center bottom;
+            }
+            #viewer-show-controls {
+                right: 8px;
+            }
+        }
+        .annotation-island button {
+            min-width: 38px;
+            height: 36px;
+            border-radius: 12px;
+        }
+        .annotation-popover {
+            position: absolute;
+            z-index: 4;
+            bottom: calc(max(12px, env(safe-area-inset-bottom)) + 52px);
+            left: 50%;
+            transform: translateX(-50%);
+            display: none;
+            gap: 6px;
+            padding: 8px;
+            border-radius: 14px;
+            background: rgba(30, 41, 59, 0.98);
+            border: 1px solid rgba(100, 116, 139, 0.95);
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+        }
+        .annotation-popover.open {
+            display: flex;
+        }
+        .annotation-popover button {
+            width: 30px;
+            height: 30px;
+            border-radius: 999px;
+            border: 2px solid transparent;
+        }
+        .annotation-popover button.selected {
+            border-color: white;
+        }
+        .width-option {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent !important;
+            transform: none !important;
+        }
+        .width-option svg {
+            display: block;
+            width: 34px;
+            height: 22px;
+        }
+        .push-switch {
+            position: relative;
+            width: 48px;
+            height: 28px;
+            border-radius: 999px;
+            background: #334155;
+            border: 0;
+            flex-shrink: 0;
+            padding: 0;
+        }
+        .push-switch.on {
+            background: #059669;
+        }
+        .push-switch::after {
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 22px;
+            height: 22px;
+            border-radius: 999px;
+            background: #fff;
+            transition: transform 180ms ease;
+        }
+        .push-switch.on::after {
+            transform: translateX(20px);
+        }
+        .push-switch.busy {
+            opacity: 0.65;
+            pointer-events: none;
+        }
+        @media (orientation: landscape) and (max-height: 600px) {
+            #app,
+            #navbar,
+            #pdf-viewer-container {
+                max-width: none;
+            }
+            #score-stage {
+                transform-origin: top center;
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 h-full overflow-hidden flex flex-col">
 
-    const options = {
-        body: data.body,
-        icon: data.icon || `${self.registration.scope}thiva_app_icon.png`,
-        badge: data.badge || `${self.registration.scope}thiva_app_icon.png`,
-        vibrate: [200, 100, 200],
-        tag: data.tag || 'thiva-philharmonic-notification',
-        data: { url: safeNotificationUrl(data.data && data.data.url) },
-        silent: false
-    };
+    <!-- APP CONTAINER -->
+    <div id="app" class="max-w-md mx-auto w-full flex-1 flex flex-col justify-between p-4">
+        
+        <!-- DYNAMIC CONTENT AREA -->
+        <div id="content" class="flex-1 pb-20">
+            <!-- Loaded dynamically via JavaScript -->
+        </div>
 
-    const title = data.title || 'Φιλαρμονική Ορχήστρα Θήβας';
-    event.waitUntil(self.registration.showNotification(title, options));
-});
+        <!-- NAVIGATION BAR (Visible when logged in) -->
+        <nav id="navbar" class="app-navbar hidden fixed left-0 right-0 bg-slate-800/95 backdrop-blur border-t border-slate-700 flex items-center justify-around px-1 py-1.5 max-w-md mx-auto z-50">
+            <button onclick="switchTab('music')" id="nav-music" class="flex-1 flex flex-col items-center justify-center text-slate-400 font-medium text-[10px] leading-tight h-12"><svg aria-hidden="true" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l10-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="16" cy="16" r="3"></circle></svg><span class="block mt-1">Παρτιτούρες</span></button>
+            <button onclick="switchTab('events')" id="nav-events" class="flex-1 flex flex-col items-center justify-center text-slate-400 font-medium text-[10px] leading-tight h-12"><svg aria-hidden="true" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg><span class="block mt-1">Πρόγραμμα</span></button>
+            <div aria-hidden="true" class="h-12 w-20 shrink-0"></div>
+            <button onclick="switchTab('home')" id="nav-home" aria-label="Αρχική" class="absolute z-10 left-1/2 top-1/2 flex h-20 w-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center">
+                <img src="./thiva_home_button.png" alt="Αρχική" class="h-20 w-20 object-contain drop-shadow-[0_4px_5px_rgba(0,0,0,0.45)]">
+            </button>
+            <button onclick="switchTab('attendance')" id="nav-attendance" class="flex-1 flex flex-col items-center justify-center text-slate-400 font-medium text-[10px] leading-tight h-12"><svg aria-hidden="true" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="m8 12 2.5 2.5L16 9"></path></svg><span class="block mt-1">Παρουσίες</span></button>
+            <button onclick="switchTab('profile')" id="nav-profile" class="flex-1 flex flex-col items-center justify-center text-slate-400 font-medium text-[10px] leading-tight h-12"><svg aria-hidden="true" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 20c.8-3.2 3.1-5 7-5s6.2 1.8 7 5"></path></svg><span class="block mt-1">Προφίλ</span></button>
+        </nav>
+    </div>
 
-self.addEventListener('notificationclick', (event) => {
-    event.notification.close();
-    const url = safeNotificationUrl(event.notification.data && event.notification.data.url);
-    event.waitUntil(
-        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
-            for (const c of clients) {
-                if ('focus' in c) {
-                    return c.focus().then(() => c.navigate(url));
+    <!-- PDF VIEWER & ANNOTATION MODAL CONTAINER -->
+    <div id="pdf-viewer-container" class="hidden fixed inset-0 bg-slate-950/95 z-50 flex flex-col p-0 max-w-none">
+        <button type="button" onclick="closePdfViewer()" aria-label="Κλείσιμο παρτιτούρας" class="viewer-chrome viewer-float left-3 text-slate-200 text-lg w-10 h-10 rounded-full">×</button>
+        <div id="page-indicator" class="viewer-chrome viewer-float page-indicator right-3 px-3 py-1.5 rounded-full">
+            <span id="page-num-display" class="text-indigo-300 font-medium min-w-[56px] text-center text-xs">1 / 1</span>
+        </div>
+        <button id="viewer-show-controls" onclick="toggleViewerChrome()" aria-label="Απόκρυψη εργαλείων" class="viewer-float text-slate-200 text-lg"><svg aria-hidden="true" class="h-5 w-5 mx-auto" viewBox="0 0 256 256" fill="currentColor"><path d="M247.31,124.76c-.35-.79-8.82-19.58-27.65-38.41C194.57,61.26,162.88,48,128,48S61.43,61.26,36.34,86.35C17.51,105.18,9,124,8.69,124.76a8,8,0,0,0,0,6.5c.35.79,8.82,19.57,27.65,38.4C61.43,194.74,93.12,208,128,208s66.57-13.26,91.66-38.34c18.83-18.83,27.3-37.61,27.65-38.4A8,8,0,0,0,247.31,124.76ZM128,192c-30.78,0-57.67-11.19-79.93-33.25A133.47,133.47,0,0,1,25,128,133.33,133.33,0,0,1,48.07,97.25C70.33,75.19,97.22,64,128,64s57.67,11.19,79.93,33.25A133.46,133.46,0,0,1,231.05,128C223.84,141.46,192.43,192,128,192Zm0-112a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Z"></path></svg></button>
+
+        <div id="canvas-wrapper" class="relative flex-1 overflow-auto bg-slate-900 flex items-center justify-center p-2 mt-0">
+            <div id="score-stage">
+                <canvas id="pdf-canvas" class="shadow-lg"></canvas>
+                <canvas id="highlight-canvas" class="absolute inset-0 pointer-events-none" style="opacity: 0.35;"></canvas>
+                <canvas id="draw-canvas" class="absolute inset-0 cursor-crosshair touch-none"></canvas>
+            </div>
+        </div>
+        <div id="pdf-loading-cover" class="hidden"></div>
+
+        <div class="viewer-chrome annotation-island">
+            <button onclick="setTool('hand')" id="tool-hand" aria-label="Χέρι" class="bg-indigo-600 text-white text-lg"><svg aria-hidden="true" class="h-5 w-5 mx-auto" viewBox="0 0 256 256" fill="currentColor"><path d="M188,48a27.75,27.75,0,0,0-12,2.71V44a28,28,0,0,0-54.65-8.6A28,28,0,0,0,80,60v64l-3.82-6.13a28,28,0,0,0-48.6,27.82c16,33.77,28.93,57.72,43.72,72.69C86.24,233.54,103.2,240,128,240a88.1,88.1,0,0,0,88-88V76A28,28,0,0,0,188,48Zm12,104a72.08,72.08,0,0,1-72,72c-20.38,0-33.51-4.88-45.33-16.85C69.44,193.74,57.26,171,41.9,138.58a6.36,6.36,0,0,0-.3-.58,12,12,0,0,1,20.79-12,1.76,1.76,0,0,0,.14.23l18.67,30A8,8,0,0,0,96,152V60a12,12,0,0,1,24,0v60a8,8,0,0,0,16,0V44a12,12,0,0,1,24,0v76a8,8,0,0,0,16,0V76a12,12,0,0,1,24,0Z"></path></svg></button>
+            <button onclick="setTool('pen')" id="tool-pen" aria-label="Πένα" class="bg-slate-800 text-slate-300 text-lg"><svg aria-hidden="true" class="h-5 w-5 mx-auto" viewBox="0 0 256 256" fill="currentColor"><path d="M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM51.31,160,136,75.31,152.69,92,68,176.68ZM48,179.31,76.69,208H48Zm48,25.38L79.31,188,164,103.31,180.69,120Zm96-96L147.31,64l24-24L216,84.68Z"></path></svg></button>
+            <button onclick="setTool('highlighter')" id="tool-highlighter" aria-label="Μαρκαδόρος" class="bg-slate-800 text-slate-300 text-lg"><svg aria-hidden="true" class="h-5 w-5 mx-auto" viewBox="0 0 256 256" fill="currentColor"><path d="M253.66,106.34a8,8,0,0,0-11.32,0L192,156.69,107.31,72l50.35-50.34a8,8,0,1,0-11.32-11.32L96,60.69A16,16,0,0,0,93.18,79.5L72,100.69a16,16,0,0,0,0,22.62L76.69,128,18.34,186.34a8,8,0,0,0,3.13,13.25l72,24A7.88,7.88,0,0,0,96,224a8,8,0,0,0,5.66-2.34L136,187.31l4.69,4.69a16,16,0,0,0,22.62,0l21.19-21.18A16,16,0,0,0,203.31,168l50.35-50.34A8,8,0,0,0,253.66,106.34ZM93.84,206.85l-55-18.35L88,139.31,124.69,176ZM152,180.69,83.31,112,104,91.31,172.69,160Z"></path></svg></button>
+            <button onclick="setTool('eraser')" id="tool-eraser" aria-label="Γόμα" class="bg-slate-800 text-slate-300 text-lg"><svg aria-hidden="true" class="h-5 w-5 mx-auto" viewBox="0 0 256 256" fill="currentColor"><path d="M225,80.4,183.6,39a24,24,0,0,0-33.94,0L31,157.66a24,24,0,0,0,0,33.94l30.06,30.06A8,8,0,0,0,66.74,224H216a8,8,0,0,0,0-16h-84.7L225,114.34A24,24,0,0,0,225,80.4ZM108.68,208H70.05L42.33,180.28a8,8,0,0,1,0-11.31L96,115.31,148.69,168Zm105-105L160,156.69,107.31,104,161,50.34a8,8,0,0,1,11.32,0l41.38,41.38a8,8,0,0,1,0,11.31Z"></path></svg></button>
+            <button onclick="undoAnnotation()" aria-label="Αναίρεση" class="bg-slate-800 text-slate-300 text-lg"><svg aria-hidden="true" class="h-5 w-5 mx-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path></svg></button>
+            <button onclick="redoAnnotation()" aria-label="Επανάληψη" class="bg-slate-800 text-slate-300 text-lg"><svg aria-hidden="true" class="h-5 w-5 mx-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7v6h-6"></path><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"></path></svg></button>
+            <button onclick="clearCanvas()" aria-label="Καθαρισμός σημειώσεων" class="bg-slate-800 text-red-300 text-lg"><svg aria-hidden="true" class="h-5 w-5 mx-auto" viewBox="0 0 256 256" fill="currentColor"><path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z"></path></svg></button>
+            <button onclick="saveAnnotations()" aria-label="Αποθήκευση σημειώσεων" class="bg-emerald-600 text-white text-lg"><svg aria-hidden="true" class="h-5 w-5 mx-auto" viewBox="0 0 256 256" fill="currentColor"><path d="M219.31,72,184,36.69A15.86,15.86,0,0,0,172.69,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V83.31A15.86,15.86,0,0,0,219.31,72ZM168,208H88V152h80Zm40,0H184V152a16,16,0,0,0-16-16H88a16,16,0,0,0-16,16v56H48V48H172.69L208,83.31ZM160,72a8,8,0,0,1-8,8H96a8,8,0,0,1,8-8h56A8,8,0,0,1,160,72Z"></path></svg></button>
+        </div>
+        <div id="annotation-options" class="annotation-popover viewer-chrome"></div>
+    </div>
+
+    <!-- JAVASCRIPT APP LOGIC -->
+    <script>
+        const SUPABASE_URL = 'https://jigwfebaxiqumrltkgli.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_ORpUPeW5OSBOwTCTIKhPUw_SX8DtV9Z';
+        const OFFICIAL_APP_HOSTS = [
+            'thivaphilharmonicorchestra.github.io',
+            'thivaphilharmonic-maker.github.io',
+            'localhost',
+            '127.0.0.1'
+        ];
+        const OFFICIAL_APP_ORIGIN = 'https://thivaphilharmonicorchestra.github.io';
+        const AUTH_IDB_NAME = 'thiva-philharmonic-auth';
+        const PUSH_OPT_KEY = 'thiva-push-opt-in';
+        const AUTH_IDB_DUMP_KEY = 'auth-dump';
+
+        function openAuthIdb() {
+            return new Promise((resolve, reject) => {
+                if (!window.indexedDB) {
+                    reject(new Error('no indexedDB'));
+                    return;
+                }
+                const req = indexedDB.open(AUTH_IDB_NAME, 1);
+                req.onupgradeneeded = () => {
+                    if (!req.result.objectStoreNames.contains('kv')) req.result.createObjectStore('kv');
+                };
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        function isAuthStorageKey(key) {
+            return !!key && (key.includes('auth-token') || key.startsWith('sb-'));
+        }
+
+        function readAuthLocalStorageDump() {
+            const dump = {};
+            try {
+                for (let i = 0; i < localStorage.length; i += 1) {
+                    const key = localStorage.key(i);
+                    if (isAuthStorageKey(key)) dump[key] = localStorage.getItem(key);
+                }
+            } catch {
+                return dump;
+            }
+            return dump;
+        }
+
+        function persistAuthDump(dump) {
+            openAuthIdb().then(db => new Promise((resolve, reject) => {
+                const tx = db.transaction('kv', 'readwrite');
+                tx.objectStore('kv').put(JSON.stringify(dump || {}), AUTH_IDB_DUMP_KEY);
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+            })).catch(() => {});
+        }
+
+        async function restoreAuthStorage() {
+            try {
+                const db = await openAuthIdb();
+                const raw = await new Promise((resolve, reject) => {
+                    const tx = db.transaction('kv', 'readonly');
+                    const req = tx.objectStore('kv').get(AUTH_IDB_DUMP_KEY);
+                    req.onsuccess = () => resolve(req.result || '');
+                    req.onerror = () => reject(req.error);
+                });
+                if (!raw) return;
+                const dump = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                Object.entries(dump || {}).forEach(([key, value]) => {
+                    if (!isAuthStorageKey(key) || !value) return;
+                    try {
+                        if (!localStorage.getItem(key)) localStorage.setItem(key, value);
+                    } catch {}
+                });
+            } catch {}
+        }
+
+        const authStorage = {
+            getItem(key) {
+                try { return localStorage.getItem(key); } catch { return null; }
+            },
+            setItem(key, value) {
+                try { localStorage.setItem(key, value); } catch {}
+                persistAuthDump(readAuthLocalStorageDump());
+            },
+            removeItem(key) {
+                try { localStorage.removeItem(key); } catch {}
+                persistAuthDump(readAuthLocalStorageDump());
+            }
+        };
+
+        function fetchWithTimeout(input, init = {}) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 20000);
+            const userSignal = init.signal;
+            if (userSignal) {
+                if (userSignal.aborted) controller.abort();
+                else userSignal.addEventListener('abort', () => controller.abort(), { once: true });
+            }
+            const { signal, ...rest } = init;
+            return fetch(input, { ...rest, signal: controller.signal }).finally(() => clearTimeout(timer));
+        }
+
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            auth: {
+                detectSessionInUrl: true,
+                persistSession: true,
+                autoRefreshToken: true,
+                storage: authStorage,
+                flowType: 'pkce',
+                lock: async (_name, _acquireTimeout, fn) => fn()
+            },
+            global: {
+                fetch: fetchWithTimeout
+            }
+        });
+
+        let appHiddenAt = 0;
+        let tabLoadGen = 0;
+        let requirePasswordSetup = false;
+        const BACKGROUND_RELOAD_MS = 30000;
+        const TAB_LOAD_RELOAD_MS = 25000;
+
+        function isPdfViewerOpen() {
+            const el = document.getElementById('pdf-viewer-container');
+            return !!(typeof pdfDoc !== 'undefined' && pdfDoc && el && !el.classList.contains('hidden'));
+        }
+
+        function resumeAppAfterBackground(event) {
+            if (document.visibilityState && document.visibilityState !== 'visible') return;
+            const sleptMs = appHiddenAt ? Date.now() - appHiddenAt : 0;
+            const fromBfcache = !!(event && event.type === 'pageshow' && event.persisted);
+            if ((fromBfcache || sleptMs >= BACKGROUND_RELOAD_MS) && !isPdfViewerOpen() && !requirePasswordSetup) {
+                window.location.reload();
+                return;
+            }
+            appHiddenAt = 0;
+            try { supabaseClient.auth.startAutoRefresh(); } catch {}
+        }
+
+        async function runTabLoad(loader) {
+            const gen = ++tabLoadGen;
+            const watchdog = setTimeout(() => {
+                if (gen !== tabLoadGen || isPdfViewerOpen() || requirePasswordSetup) return;
+                window.location.reload();
+            }, TAB_LOAD_RELOAD_MS);
+            try {
+                await loader();
+            } finally {
+                if (gen === tabLoadGen) clearTimeout(watchdog);
+            }
+        }
+
+        const LOGO_URL = 'https://raw.githubusercontent.com/thivaphilharmonic-maker/thiva-philharmonic-orchestra-app/main/logo.png';
+        const APP_ICON_URL = './thiva_app_icon.png';
+        const ANDROID_ICON_URL = './thiva_app_icon_android.png';
+
+        // =====================================================================
+        // 👇 PASTE YOUR VAPID PUBLIC KEY HERE (from generate_vapid_keys.js)
+        //    It should look something like:
+        //    'BLR4rZ8...about 87 chars...g7kM'
+        // =====================================================================
+        const VAPID_PUBLIC_KEY = 'BC9s7cPQRYLAe_-FG11M_RI5WZOOAUDDGijHAOgrpmO6w62YW1NEieBqXvYb-_HTQDnzqcZhn0MVvtxxF05YJuc';
+
+        // =====================================================================
+        // 👇 PASTE YOUR SUPABASE EDGE FUNCTION URL HERE (ONCE YOU DEPLOY IT)
+        //    Example:
+        //    'https://jigwfebaxiqumrltkgli.supabase.co/functions/v1/push-sender'
+        // =====================================================================
+        const PUSH_EDGE_FUNCTION_URL = 'https://jigwfebaxiqumrltkgli.supabase.co/functions/v1/push-sender';
+
+        function urlB64ToUint8Array(base64String) {
+            if (!base64String || base64String === 'PASTE_YOUR_VAPID_PUBLIC_KEY_HERE') return null;
+            try {
+                const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+                const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+                const rawData = window.atob(base64);
+                const outputArray = new Uint8Array(rawData.length);
+                for (let i = 0; i < rawData.length; ++i) {
+                    outputArray[i] = rawData.charCodeAt(i);
+                }
+                return outputArray.length === 65 ? outputArray : null;
+            } catch {
+                return null;
+            }
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, char => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[char]));
+        }
+
+        function showAppNotice(message) {
+            const existing = document.getElementById('app-notice');
+            if (existing) existing.remove();
+            const el = document.createElement('div');
+            el.id = 'app-notice';
+            el.className = 'fixed top-4 left-1/2 -translate-x-1/2 z-[10001] bg-slate-800 border border-emerald-500/50 text-emerald-200 text-sm font-medium px-4 py-2.5 rounded-xl max-w-[90%] text-center';
+            el.textContent = message;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 4000);
+        }
+
+        function showAppStepsDialog(message) {
+            document.getElementById('app-steps')?.remove();
+            const dialog = document.createElement('div');
+            dialog.id = 'app-steps';
+            dialog.className = 'fixed inset-0 z-[10002] bg-black/60 flex items-center justify-center p-4';
+            dialog.innerHTML = `
+                <div class="bg-slate-800 border border-slate-600 rounded-2xl p-4 w-full max-w-sm max-h-[85vh] flex flex-col">
+                    <p class="text-sm text-slate-100 whitespace-pre-wrap text-left leading-relaxed overflow-y-auto mb-4"></p>
+                    <button type="button" id="app-steps-ok" class="py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold">Εντάξει</button>
+                </div>`;
+            dialog.querySelector('p').textContent = message;
+            document.body.appendChild(dialog);
+            dialog.querySelector('#app-steps-ok').onclick = () => dialog.remove();
+        }
+
+        function confirmAppAction(message) {
+            return new Promise((resolve) => {
+                document.getElementById('app-confirm')?.remove();
+                const dialog = document.createElement('div');
+                dialog.id = 'app-confirm';
+                dialog.className = 'fixed inset-0 z-[10002] bg-black/60 flex items-center justify-center p-4';
+                dialog.innerHTML = `
+                    <div class="bg-slate-800 border border-slate-600 rounded-2xl p-4 w-full max-w-sm">
+                        <p class="text-sm text-slate-100 mb-4"></p>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button type="button" id="app-confirm-no" class="py-2.5 rounded-lg bg-slate-700 text-white text-sm font-semibold">Όχι</button>
+                            <button type="button" id="app-confirm-yes" class="py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold">Ναι</button>
+                        </div>
+                    </div>`;
+                dialog.querySelector('p').textContent = message;
+                document.body.appendChild(dialog);
+                dialog.querySelector('#app-confirm-no').onclick = () => { dialog.remove(); resolve(false); };
+                dialog.querySelector('#app-confirm-yes').onclick = () => { dialog.remove(); resolve(true); };
+            });
+        }
+
+        function safeExternalUrl(value) {
+            try {
+                const url = new URL(String(value));
+                return ['http:', 'https:'].includes(url.protocol) ? escapeHtml(url.href) : '#';
+            } catch {
+                return '#';
+            }
+        }
+
+        let currentUser = null;
+        let currentProfile = null;
+        let assignmentDirectory = [];
+        let eventsViewMode = 'list'; 
+        let selectedCalendarDate = null;
+        let eventsTabCache = { events: null, responses: null };
+        let pdfScratchCanvas = null; 
+
+        let pdfDoc = null;
+        let pageNum = 1;
+        let pageRendering = false;
+        let pageNumPending = null;
+        let scale = 1.3;
+        let scoreZoom = 1;
+        let minimumScoreScale = 1;
+        let pdfCanvas = null;
+        let pdfCtx = null;
+        let highlightCanvas = null;
+        let highlightCtx = null;
+        let drawCanvas = null;
+        let drawCtx = null;
+        let isDrawing = false;
+        let pinchStartDistance = null;
+        let pinchStartZoom = null;
+        let pinchStartMidpoint = null;
+        let panX = 0;
+        let panY = 0;
+        let panStartX = 0;
+        let panStartY = 0;
+        let handStartX = 0;
+        let handStartY = 0;
+        let handStartPanX = 0;
+        let handStartPanY = 0;
+        let handMoved = false;
+        let scoreStage = null;
+        let lastScoreTapAt = 0;
+        let lastScoreTapX = 0;
+        let lastScoreTapY = 0;
+        let scoreTapTimer = null;
+        let lastDrawX = 0;
+        let lastDrawY = 0;
+        let touchWasDrawing = false;
+        let touchGestureActive = false;
+        let pageSwipeStartX = null;
+        let pageSwipeStartY = null;
+        let pageIndicatorTimer = null;
+        let viewerResizeTimer = null;
+        let pdfRefitQueued = false;
+        let pdfRefitRunning = false;
+        let pdfRefitToken = 0;
+        let pdfRefitIgnoreUntil = 0;
+        let lastPdfFitWidth = 0;
+        let pushBusy = false;
+        let annotationHistory = [];
+        let annotationRedoHistory = [];
+        let annotationsDirty = false;
+        let viewerHistoryActive = false;
+        let pdfViewerClosing = false;
+        let currentTool = 'hand';
+        const annotationSettings = {
+            pen: { color: '#111827', width: 3.5 },
+            highlighter: { color: '#facc15', width: 18 },
+            eraser: { width: 20 }
+        };
+        let activePieceId = null;
+
+        let currentCalendarMonth = new Date().getMonth();
+        let currentCalendarYear = new Date().getFullYear();
+
+        let musicFilter = { search: '', instrument: 'all', set: 'all' };
+        let musicLibraryCache = [];
+        let musicTabShellReady = false;
+        let pdfWakeLock = null;
+
+        let pushSubscription = null;
+
+        function isTabletShell() {
+            const shortSide = Math.min(window.screen.width || 0, window.screen.height || 0);
+            return shortSide >= 600;
+        }
+
+        function syncTabletShell() {
+            document.documentElement.classList.toggle('tablet-shell', isTabletShell());
+        }
+
+        function isIosDevice() {
+            return /iPad|iPhone|iPod/.test(navigator.userAgent)
+                || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        }
+
+        function isStandaloneDisplay() {
+            return window.matchMedia('(display-mode: standalone)').matches
+                || window.navigator.standalone === true;
+        }
+
+        function isAndroidDevice() {
+            return /Android/i.test(navigator.userAgent);
+        }
+
+        function pushUnsupportedMessage() {
+            const notices = ' Οι ανακοινώσεις εξακολουθούν να φαίνονται εντός της εφαρμογής.';
+            if (isIosDevice() && !isStandaloneDisplay()) {
+                return 'Στο Safari οι ειδοποιήσεις δεν ενεργοποιούνται. Προσθέστε την εφαρμογή στην Αρχική οθόνη και ανοίξτε την από εκεί.' + notices;
+            }
+            if (isIosDevice()) {
+                return 'Αυτή η έκδοση iOS δεν υποστηρίζει ειδοποιήσεις εφαρμογής. Απαιτείται iOS 16.4 ή νεότερο.' + notices;
+            }
+            if (isAndroidDevice()) {
+                return 'Αυτό το πρόγραμμα περιήγησης δεν υποστηρίζει ειδοποιήσεις. Ανοίξτε την εφαρμογή σε Chrome.' + notices;
+            }
+            return 'Οι ειδοποιήσεις δεν υποστηρίζονται σε αυτό το πρόγραμμα περιήγησης.' + notices;
+        }
+
+        function lockIosOverscroll() {
+            const scroller = document.getElementById('content');
+            if (!scroller || scroller.dataset.overscrollLocked) return;
+            scroller.dataset.overscrollLocked = '1';
+            let startY = 0;
+            scroller.addEventListener('touchstart', (event) => {
+                if (event.touches.length === 1) startY = event.touches[0].clientY;
+            }, { passive: true });
+            scroller.addEventListener('touchmove', (event) => {
+                if (event.touches.length !== 1) return;
+                const dy = event.touches[0].clientY - startY;
+                const atTop = scroller.scrollTop <= 0 && dy > 0;
+                const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1 && dy < 0;
+                if (atTop || atBottom) event.preventDefault();
+            }, { passive: false });
+        }
+
+        function setAuthNarrow(on) {
+            document.documentElement.classList.toggle('auth-narrow', !!on);
+        }
+
+        function setViewportMeta(cover) {
+            const meta = document.querySelector('meta[name="viewport"]');
+            if (!meta) return;
+            meta.setAttribute(
+                'content',
+                cover
+                    ? 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'
+                    : 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no'
+            );
+            window.scrollTo(0, 0);
+        }
+
+        function resetBrowserZoom() {
+            const pdfOpen = pdfDoc && !document.getElementById('pdf-viewer-container')?.classList.contains('hidden');
+            setViewportMeta(!!pdfOpen);
+        }
+
+        async function enterPdfFullscreen() {
+            return;
+        }
+
+        async function exitPdfFullscreen() {
+            try {
+                if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen();
+                else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+            } catch {}
+        }
+
+        function viewerFitWidth() {
+            const wrapper = document.getElementById('canvas-wrapper');
+            const viewer = document.getElementById('pdf-viewer-container');
+            const width = Math.max(
+                wrapper?.clientWidth || 0,
+                viewer?.clientWidth || 0,
+                document.documentElement.clientWidth || 0,
+                window.innerWidth || 0,
+                Math.round(window.visualViewport?.width || 0)
+            );
+            return Math.max(280, Math.round(width) - 16);
+        }
+
+        function pdfViewerOpen() {
+            return !!(pdfDoc && !document.getElementById('pdf-viewer-container')?.classList.contains('hidden'));
+        }
+
+        function ignorePdfRefitEvents(ms = 500) {
+            pdfRefitIgnoreUntil = Date.now() + ms;
+        }
+
+        function pdfOutputScale(cssWidth, cssHeight) {
+            const dpr = window.devicePixelRatio || 1;
+            const maxPixels = 16000000;
+            const raw = Math.max(1, cssWidth * cssHeight * dpr * dpr);
+            if (raw <= maxPixels) return dpr;
+            return Math.max(1, Math.sqrt(maxPixels / Math.max(1, cssWidth * cssHeight)));
+        }
+
+        function resizeCanvasBuffer(canvas, pixelWidth, pixelHeight, cssWidth, cssHeight) {
+            if (!canvas) return;
+            if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+            if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+            canvas.style.width = `${cssWidth}px`;
+            canvas.style.height = `${cssHeight}px`;
+        }
+
+        function snapshotInkBitmaps() {
+            if (!drawCanvas || !highlightCanvas) return null;
+            if ((drawCanvas.width <= 1 && highlightCanvas.width <= 1)) return null;
+            return {
+                drawing: cloneAnnotationCanvas(drawCanvas),
+                highlighting: cloneAnnotationCanvas(highlightCanvas)
+            };
+        }
+
+        function restoreInkBitmaps(ink) {
+            if (!ink || !drawCtx || !highlightCtx) return;
+            if (ink.drawing) drawCtx.drawImage(ink.drawing, 0, 0, drawCanvas.width, drawCanvas.height);
+            if (ink.highlighting) highlightCtx.drawImage(ink.highlighting, 0, 0, highlightCanvas.width, highlightCanvas.height);
+            if (ink.drawing) ink.drawing.width = 0;
+            if (ink.highlighting) ink.highlighting.width = 0;
+        }
+
+        function onViewportChange() {
+            if (!pdfViewerOpen()) {
+                syncTabletShell();
+                return;
+            }
+            applyPdfCssFit();
+            if (Date.now() < pdfRefitIgnoreUntil) return;
+            schedulePdfRefit();
+        }
+
+        function applyPdfCssFit() {
+            if (!pdfCanvas || !pdfDoc) return;
+            const width = viewerFitWidth();
+            const currentW = parseFloat(pdfCanvas.style.width) || 0;
+            const currentH = parseFloat(pdfCanvas.style.height) || 0;
+            if (!currentW || !currentH) return;
+            if (Math.abs(currentW - width) < 2) return;
+            const height = currentH * (width / currentW);
+            scoreStage?.classList.add('pdf-resizing');
+            [pdfCanvas, drawCanvas, highlightCanvas].forEach(canvas => {
+                if (!canvas) return;
+                canvas.style.width = `${width}px`;
+                canvas.style.height = `${height}px`;
+            });
+        }
+
+        function schedulePdfRefit() {
+            if (!pdfViewerOpen()) return;
+            applyPdfCssFit();
+            clearTimeout(viewerResizeTimer);
+            const token = ++pdfRefitToken;
+            viewerResizeTimer = setTimeout(() => runPdfRefit(token), 280);
+        }
+
+        async function runPdfRefit(token) {
+            if (token !== pdfRefitToken || !pdfViewerOpen()) return;
+            if (pdfRefitRunning || pageRendering) {
+                pdfRefitQueued = true;
+                return;
+            }
+            const width = viewerFitWidth();
+            if (lastPdfFitWidth && Math.abs(width - lastPdfFitWidth) < 12) {
+                applyPdfCssFit();
+                scoreStage?.classList.remove('pdf-resizing');
+                return;
+            }
+            pdfRefitRunning = true;
+            pdfRefitQueued = false;
+            ignorePdfRefitEvents(700);
+            const ink = snapshotInkBitmaps();
+            try {
+                await renderPage(pageNum);
+                restoreInkBitmaps(ink);
+            } catch (error) {
+                console.warn('PDF refit failed:', error);
+            } finally {
+                pdfRefitRunning = false;
+                scoreStage?.classList.remove('pdf-resizing');
+                ignorePdfRefitEvents(450);
+                if (pdfRefitQueued) {
+                    pdfRefitQueued = false;
+                    schedulePdfRefit();
                 }
             }
-            if (self.clients.openWindow) return self.clients.openWindow(url);
-        })
-    );
-});
+        }
+
+        syncTabletShell();
+        window.addEventListener('orientationchange', onViewportChange);
+        if (window.visualViewport) window.visualViewport.addEventListener('resize', onViewportChange);
+        window.addEventListener('resize', onViewportChange);
+
+        window.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                resumeAppAfterBackground();
+                if (isPdfViewerOpen()) requestPdfWakeLock();
+            } else {
+                appHiddenAt = Date.now();
+                try { supabaseClient.auth.stopAutoRefresh(); } catch {}
+            }
+        });
+        window.addEventListener('pageshow', (event) => resumeAppAfterBackground(event));
+        window.addEventListener('focus', () => resumeAppAfterBackground());
+        window.addEventListener('online', () => resumeAppAfterBackground());
+        document.addEventListener('touchstart', () => {
+            if (appHiddenAt) resumeAppAfterBackground();
+        }, { passive: true });
+        window.addEventListener('popstate', () => {
+            if (!viewerHistoryActive) return;
+            viewerHistoryActive = false;
+            closePdfViewer(true);
+        });
+        let passwordSetupMode = 'invite';
+        let serviceWorkerRegistration = null;
+
+        function appRedirectUrl() {
+            const path = window.location.pathname.replace(/index\.html$/i, '');
+            return `${window.location.origin}${path}`;
+        }
+
+        function authCallbackParams() {
+            const search = new URLSearchParams(window.location.search);
+            const hash = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
+            return {
+                type: (search.get('type') || hash.get('type') || '').toLowerCase(),
+                code: search.get('code') || hash.get('code'),
+                tokenHash: search.get('token_hash') || hash.get('token_hash'),
+                token: search.get('token') || hash.get('token'),
+                accessToken: hash.get('access_token'),
+                refreshToken: hash.get('refresh_token'),
+                error: search.get('error') || hash.get('error'),
+                errorDescription: search.get('error_description') || hash.get('error_description')
+            };
+        }
+
+        function isPasswordSetupCallback(cb = authCallbackParams()) {
+            return ['invite', 'recovery', 'signup'].includes(cb.type)
+                || !!cb.code
+                || !!cb.tokenHash
+                || !!cb.accessToken;
+        }
+
+        function clearAuthCallbackFromUrl() {
+            const clean = window.location.pathname;
+            history.replaceState({}, document.title, clean);
+        }
+
+        function renderAuthLoading() {
+            setAuthNarrow(true);
+            document.getElementById('navbar').classList.add('hidden');
+            document.getElementById('content').innerHTML = `
+                <div class="flex flex-col items-center justify-center min-h-[85vh] text-center">
+                    <img src="${LOGO_URL}" alt="Logo" class="w-20 h-20 mb-4 object-contain drop-shadow-md">
+                    <p class="text-slate-400 text-sm">Σύνδεση...</p>
+                </div>
+            `;
+        }
+
+        function isUsedAuthLinkError(message) {
+            return /invalid|expired|already|used|session/i.test(message || '');
+        }
+
+        async function completeAuthFromUrl() {
+            const cb = authCallbackParams();
+
+            if (cb.accessToken) {
+                const { data, error } = await supabaseClient.auth.setSession({
+                    access_token: cb.accessToken,
+                    refresh_token: cb.refreshToken || ''
+                });
+                if (data?.session) return { session: data.session, type: cb.type || 'invite', error: null };
+                if (error && !isUsedAuthLinkError(error.message)) {
+                    return { session: null, type: cb.type, error: error.message };
+                }
+            }
+
+            const otpType = ['invite', 'recovery', 'signup', 'email', 'magiclink'].includes(cb.type)
+                ? (cb.type === 'magiclink' ? 'email' : cb.type)
+                : 'invite';
+
+            if (cb.tokenHash) {
+                const { error } = await supabaseClient.auth.verifyOtp({
+                    token_hash: cb.tokenHash,
+                    type: otpType
+                });
+                const { data: { session } } = await supabaseClient.auth.getSession();
+                if (session) return { session, type: cb.type || 'invite', error: null };
+                if (error && !isUsedAuthLinkError(error.message)) {
+                    return { session: null, type: cb.type, error: error.message };
+                }
+            }
+
+            if (cb.token && !cb.code) {
+                const { error } = await supabaseClient.auth.verifyOtp({
+                    token: cb.token,
+                    type: otpType
+                });
+                const { data: { session } } = await supabaseClient.auth.getSession();
+                if (session) return { session, type: cb.type || 'invite', error: null };
+                if (error && !isUsedAuthLinkError(error.message)) {
+                    return { session: null, type: cb.type, error: error.message };
+                }
+            }
+
+            if (cb.code) {
+                const { error } = await supabaseClient.auth.exchangeCodeForSession(cb.code);
+                const { data: { session } } = await supabaseClient.auth.getSession();
+                if (session) return { session, type: cb.type || 'invite', error: null };
+                if (error && !isUsedAuthLinkError(error.message)) {
+                    return { session: null, type: cb.type, error: error.message };
+                }
+            }
+
+            let { data: { session } } = await supabaseClient.auth.getSession();
+            if (session) {
+                return { session, type: cb.type, error: null };
+            }
+
+            if (cb.error) {
+                return {
+                    session: null,
+                    type: cb.type,
+                    error: decodeURIComponent((cb.errorDescription || cb.error).replace(/\+/g, ' '))
+                };
+            }
+            if (cb.code || cb.tokenHash || cb.token || cb.accessToken || ['invite', 'recovery', 'signup'].includes(cb.type)) {
+                return {
+                    session: null,
+                    type: cb.type,
+                    error: 'Δεν ολοκληρώθηκε η πρόσκληση. Ελέγξτε ότι το Site URL στο Supabase είναι η διεύθυνση της εφαρμογής, και ζητήστε νέα πρόσκληση.'
+                };
+            }
+            return { session: null, type: cb.type, error: null };
+        }
+
+        async function init() {
+            await restoreAuthStorage();
+            syncTabletShell();
+            lockIosOverscroll();
+            registerServiceWorker();
+            initPushSupport();
+            if (window.location.hash === '#notifications') activeTab = 'notifications';
+            if (window.location.hash === '#events') activeTab = 'events';
+            if (window.location.hash === '#attendance') activeTab = 'attendance';
+
+            const cbInfo = authCallbackParams();
+            if (isPasswordSetupCallback(cbInfo)) {
+                requirePasswordSetup = true;
+                passwordSetupMode = cbInfo.type === 'recovery' ? 'recovery' : 'invite';
+                renderAuthLoading();
+            }
+
+            let authReady = false;
+            const { session, type, error } = await completeAuthFromUrl();
+            authReady = true;
+
+            supabaseClient.auth.onAuthStateChange(async (event, nextSession) => {
+                if (blockUnofficialApp()) return;
+                if (!authReady && !nextSession) return;
+                if (event === 'PASSWORD_RECOVERY') {
+                    requirePasswordSetup = true;
+                    passwordSetupMode = 'recovery';
+                    if (nextSession) currentUser = nextSession.user;
+                    renderSetPasswordScreen();
+                    return;
+                }
+                if (requirePasswordSetup && nextSession && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'PASSWORD_RECOVERY')) {
+                    currentUser = nextSession.user;
+                    renderSetPasswordScreen();
+                    return;
+                }
+
+                if (requirePasswordSetup) return;
+
+                if (nextSession) {
+                    currentUser = nextSession.user;
+                    if (event === 'TOKEN_REFRESHED') return;
+                    await fetchProfile();
+                    renderApp();
+                } else if (event !== 'INITIAL_SESSION' || authReady) {
+                    currentUser = null;
+                    currentProfile = null;
+                    renderLogin();
+                }
+            });
+
+            if (blockUnofficialApp()) return;
+
+            if (session) {
+                currentUser = session.user;
+                if (requirePasswordSetup) {
+                    renderSetPasswordScreen();
+                    return;
+                }
+                await fetchProfile();
+                renderApp();
+                return;
+            }
+
+            if (error) {
+                renderLogin(error);
+                return;
+            }
+
+            renderLogin();
+        }
+
+        function registerServiceWorker() {
+            if (!('serviceWorker' in navigator)) return Promise.resolve(null);
+            if (serviceWorkerRegistration) return serviceWorkerRegistration;
+
+            serviceWorkerRegistration = navigator.serviceWorker.register('./sw.js')
+                .then(reg => {
+                    console.log('Service Worker registered:', reg.scope);
+                    return reg;
+                })
+                .catch(err => {
+                    serviceWorkerRegistration = null;
+                    console.warn('Service Worker registration failed:', err);
+                    return null;
+                });
+            return serviceWorkerRegistration;
+        }
+
+        async function readyPushRegistration() {
+            const registered = await registerServiceWorker();
+            if (!registered) return null;
+            return navigator.serviceWorker.ready;
+        }
+
+        function pushSubscribeBlockedReason() {
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+                return 'Οι ειδοποιήσεις δεν υποστηρίζονται από αυτό το πρόγραμμα περιήγησης.';
+            }
+            if (isIosDevice() && /CriOS|FxiOS|EdgiOS|OPiOS/.test(navigator.userAgent)) {
+                return 'Στο iPhone οι ειδοποιήσεις δουλεύουν μόνο από Safari, με την εφαρμογή στην οθόνη Αφετηρίας (Προσθήκη στην Οθόνη Αφετηρίας).';
+            }
+            if (isIosDevice() && !isStandaloneDisplay()) {
+                return 'Στο iPhone ανοίξτε την εφαρμογή από την οθόνη Αφετηρίας (Safari → Κοινή χρήση → Προσθήκη στην Οθόνη Αφετηρίας) και ενεργοποιήστε τις ειδοποιήσεις εκεί.';
+            }
+            return '';
+        }
+
+        function isPushServiceError(error) {
+            const name = error?.name || '';
+            const msg = String(error?.message || error || '');
+            return /push service error|Registration failed/i.test(msg) || name === 'AbortError';
+        }
+
+        function isPhoneOrTablet() {
+            return isIosDevice() || isAndroidDevice();
+        }
+
+        function pushSubscribeHelpMessage() {
+            const title = 'Σφάλμα ενεργοποίησης ειδοποιήσεων.';
+            if (!isPhoneOrTablet()) {
+                return [
+                    title,
+                    '',
+                    'Οι ειδοποιήσεις της εφαρμογής προορίζονται για το τηλέφωνο ή το τάμπλετ. Εγκαταστήστε την εκεί, ανοίξτε την από το εικονίδιο και ενεργοποιήστε τις ειδοποιήσεις μέσα στην εφαρμογή.'
+                ].join('\n');
+            }
+            if (isStandaloneDisplay()) {
+                if (isIosDevice()) {
+                    return [
+                        title,
+                        '',
+                        '1. Ρυθμίσεις της συσκευής → Ειδοποιήσεις → Φιλαρμονική: κλείστε τις ειδοποιήσεις και ανοίξτε τις ξανά.',
+                        '2. Επιστρέψτε στην εφαρμογή και ενεργοποιήστε τις ειδοποιήσεις ξανά.'
+                    ].join('\n');
+                }
+                return [
+                    title,
+                    '',
+                    '1. Ρυθμίσεις της συσκευής → Εφαρμογές → αυτή η εφαρμογή ή Chrome → Ειδοποιήσεις: κλείστε τις, περιμένετε λίγο, ανοίξτε τις ξανά.',
+                    '2. Επιστρέψτε στην εφαρμογή και ενεργοποιήστε τις ειδοποιήσεις ξανά.'
+                ].join('\n');
+            }
+            if (isIosDevice()) {
+                return [
+                    title,
+                    '',
+                    '1. Η εφαρμογή πρέπει να είναι στην οθόνη Αφετηρίας. Στο Safari: Κοινοποίηση → Προσθήκη στην οθόνη Αφετηρίας. Ανοίξτε την μόνο από το εικονίδιο, όχι από καρτέλα.',
+                    '2. Ρυθμίσεις της συσκευής → Ειδοποιήσεις → Φιλαρμονική: κλείστε τις ειδοποιήσεις και ανοίξτε τις ξανά.',
+                    '3. Μέσα στην εγκατεστημένη εφαρμογή, ενεργοποιήστε τις ειδοποιήσεις ξανά.'
+                ].join('\n');
+            }
+            return [
+                title,
+                '',
+                '1. Η εφαρμογή πρέπει να είναι εγκατεστημένη. Στο Chrome: μενού ⋮ → Εγκατάσταση εφαρμογής ή Προσθήκη στην αρχική οθόνη. Ανοίξτε την μόνο από το εικονίδιο, όχι από καρτέλα.',
+                '2. Ρυθμίσεις της συσκευής → Εφαρμογές → αυτή η εφαρμογή ή Chrome → Ειδοποιήσεις: κλείστε τις, περιμένετε λίγο, ανοίξτε τις ξανά.',
+                '3. Μέσα στην εγκατεστημένη εφαρμογή, ενεργοποιήστε τις ειδοποιήσεις ξανά.'
+            ].join('\n');
+        }
+
+        async function initPushSupport() {
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+            try {
+                const reg = await readyPushRegistration();
+                if (!reg) return;
+                const sub = await reg.pushManager.getSubscription();
+                pushSubscription = localStorage.getItem(PUSH_OPT_KEY) === '0' ? null : sub;
+            } catch (e) {
+                console.warn('Push init failed:', e);
+            }
+        }
+
+        async function fetchProfile() {
+            if (!currentUser) return;
+            
+            let { data } = await supabaseClient
+                .from('profiles')
+                .select('*')
+                .eq('id', currentUser.id)
+                .maybeSingle();
+
+            const candidates = [];
+            if (data) candidates.push(data);
+            if (currentUser.email) {
+                const { data: byEmail } = await supabaseClient
+                    .from('profiles')
+                    .select('*')
+                    .ilike('email', currentUser.email);
+                (byEmail || []).forEach(row => {
+                    if (!candidates.some(c => c.id === row.id)) candidates.push(row);
+                });
+            }
+
+            const candidateIds = [...new Set([
+                ...candidates.map(row => row.id),
+                currentUser.id
+            ].filter(Boolean))];
+
+            if (data) {
+                currentProfile = data;
+            } else if (candidates[0]) {
+                currentProfile = candidates[0];
+            } else {
+                currentProfile = { email: currentUser.email, role: 'musician', instrument: 'Μη ορισμένο' };
+            }
+
+            assignmentDirectory = [];
+            if (candidateIds.length) {
+                let assignments = [];
+                const withNames = await supabaseClient
+                    .from('user_instruments')
+                    .select('user_id, instrument_id, part_position, concert_set, instruments(name, is_section, is_percussion)');
+                if (!withNames.error) {
+                    assignmentDirectory = withNames.data || [];
+                    assignments = assignmentDirectory.filter(row => candidateIds.includes(row.user_id));
+                } else {
+                    const plain = await supabaseClient
+                        .from('user_instruments')
+                        .select('user_id, instrument_id, part_position, concert_set')
+                        .in('user_id', candidateIds);
+                    assignments = plain.error ? [] : (plain.data || []);
+                    const ids = [...new Set(assignments.map(row => row.instrument_id).filter(Boolean))];
+                    if (ids.length) {
+                        const named = await supabaseClient.from('instruments').select('id, name, is_section, is_percussion').in('id', ids);
+                        const byId = Object.fromEntries((named.data || []).map(row => [row.id, row]));
+                        assignments = assignments.map(row => ({
+                            ...row,
+                            instruments: byId[row.instrument_id]
+                                ? { name: byId[row.instrument_id].name, is_section: byId[row.instrument_id].is_section, is_percussion: byId[row.instrument_id].is_percussion }
+                                : row.instruments
+                        }));
+                    }
+                    assignmentDirectory = assignments;
+                }
+                const assignedIds = new Set(assignments.map(row => row.user_id).filter(Boolean));
+                const ranked = candidates.slice().sort((a, b) => {
+                    const score = (p) =>
+                        (assignedIds.has(p.id) ? 8 : 0)
+                        + (p.role === 'admin' ? 4 : p.role === 'conductor' ? 3 : 0)
+                        + (((p.first_name || '').trim() || (p.last_name || '').trim()) ? 2 : 0)
+                        + (p.id === currentUser.id ? 1 : 0);
+                    return score(b) - score(a);
+                });
+                if (ranked[0]) currentProfile = ranked[0];
+                const profileId = currentProfile?.id;
+                currentProfile.assignments = profileId
+                    ? assignments.filter(row => !row.user_id || row.user_id === profileId)
+                    : assignments;
+            } else {
+                currentProfile.assignments = [];
+            }
+        }
+
+        function isAdminRole() {
+            return profileHasAdminRole(currentProfile);
+        }
+
+        function isConductorRole() {
+            return profileHasConductorRole(currentProfile);
+        }
+
+        function foldedProfileRole(profile) {
+            return String(profile?.role || '')
+                .normalize('NFD')
+                .replace(/\p{M}/gu, '')
+                .toLowerCase()
+                .trim();
+        }
+
+        function profileHasAdminRole(profile) {
+            return foldedProfileRole(profile) === 'admin';
+        }
+
+        function profileHasConductorRole(profile) {
+            const role = foldedProfileRole(profile);
+            return role === 'conductor' || role === 'μαεστρος' || role === 'maestro';
+        }
+
+        function isMusicianRole() {
+            const role = (currentProfile?.role || '').toLowerCase();
+            return !isAdminRole() && !isConductorRole() && (role === 'musician' || role === 'member' || !role);
+        }
+
+        function isPrivilegedRole() {
+            return isAdminRole() || isConductorRole();
+        }
+
+        function legacyAssignmentLabel() {
+            const legacy = (currentProfile?.instrument || '').trim();
+            if (legacy === 'Κρουστά' || legacy === 'Percussion' || legacy === 'Percussion (all)' || legacy === 'Percussion Section') return 'Percussion Section';
+            if (legacy && legacy !== 'Μαέστρος' && legacy !== 'Μη ορισμένο') return legacy;
+            return '';
+        }
+
+        function hasPercussionAllAssignment() {
+            if ((currentProfile?.assignments || []).some(row => {
+                const rel = Array.isArray(row.instruments) ? row.instruments[0] : row.instruments;
+                return rel?.name === 'Percussion Section' || rel?.name === 'Percussion (all)' || rel?.is_section === true;
+            })) return true;
+            return legacyAssignmentLabel() === 'Percussion Section';
+        }
+
+        function canFilterMusicInstruments() {
+            return isPrivilegedRole() || hasPercussionAllAssignment();
+        }
+
+        function formatEventTime(timeValue) {
+            if (!timeValue) return '';
+            const raw = String(timeValue).trim();
+            const match = raw.match(/^(\d{1,2}):(\d{2})/);
+            if (!match) return raw;
+            return `${match[1].padStart(2, '0')}:${match[2]}`;
+        }
+
+        function relationName(rel) {
+            if (!rel) return '';
+            if (Array.isArray(rel)) return rel[0]?.name || '';
+            return rel.name || '';
+        }
+
+        function instrumentUiName(name, isSection) {
+            const n = (name || '').trim();
+            if (isSection || n === 'Percussion (all)' || n === 'Percussion Section') return 'Percussion Section';
+            if (n === 'French Horn') return 'Horn in F';
+            return n;
+        }
+
+        function relationIsSection(rel) {
+            if (!rel) return false;
+            const row = Array.isArray(rel) ? rel[0] : rel;
+            return row?.is_section === true || row?.name === 'Percussion (all)' || row?.name === 'Percussion Section';
+        }
+
+        function musicPartLabel(item) {
+            const part = Array.isArray(item?.musical_parts) ? item.musical_parts[0] : item?.musical_parts;
+            const instrumentName = relationName(part?.instruments);
+            if (instrumentName === 'Percussion (all)' || instrumentName === 'Percussion Section' || relationIsSection(part?.instruments)) {
+                return 'Percussion';
+            }
+            const base = instrumentName || item?.instrument_part || '';
+            if (part?.is_beginner && base) return `${base} (beginner)`;
+            if (part?.part_position && base) return `${base} ${part.part_position}`;
+            if (part?.display_name) return part.display_name;
+            return base || item?.concert_set || 'Γενικό';
+        }
+
+        function instrumentPeerCount(instrumentId) {
+            if (!instrumentId) return 0;
+            const users = new Set(
+                (assignmentDirectory || [])
+                    .filter(row => row.instrument_id === instrumentId && !row.concert_set)
+                    .map(row => row.user_id)
+                    .filter(Boolean)
+            );
+            return users.size;
+        }
+
+        function assignmentRowLabel(row) {
+            const name = instrumentUiName(relationName(row.instruments), relationIsSection(row.instruments)) || 'Όργανο';
+            const showPart = Boolean(row.part_position) && instrumentPeerCount(row.instrument_id) > 1;
+            let label = showPart ? `${name} ${row.part_position}` : name;
+            if (row.concert_set) label += ` · ${row.concert_set}`;
+            return label;
+        }
+
+        function assignmentLabels() {
+            const all = currentProfile?.assignments || [];
+            const general = all.filter(row => !row.concert_set);
+            const rows = general.length ? general : all;
+            if (!rows.length) {
+                const legacy = legacyAssignmentLabel();
+                return legacy ? [legacy] : [];
+            }
+            return rows.map(assignmentRowLabel);
+        }
+
+        function primaryAssignmentRow(profile) {
+            const all = profile?.assignments || [];
+            const general = all.filter(row => !row.concert_set).slice().sort((a, b) => {
+                const byDate = String(a.created_at || '').localeCompare(String(b.created_at || ''));
+                if (byDate) return byDate;
+                return String(a.id || '').localeCompare(String(b.id || ''));
+            });
+            return general[0] || null;
+        }
+
+        function profilePrimaryInstrumentLabel(profile) {
+            const row = primaryAssignmentRow(profile);
+            if (row) return assignmentRowLabel({ ...row, concert_set: null });
+            if (profileHasConductorRole(profile)) return 'Μαέστρος';
+            if (profileHasAdminRole(profile)) return 'Διαχειριστής';
+            const legacy = (profile?.instrument || '').trim();
+            if (legacy && legacy !== 'Μη ορισμένο') return legacy;
+            return '';
+        }
+
+        function attendanceInstrumentSuffix(profile) {
+            const label = profilePrimaryInstrumentLabel(profile);
+            return label ? ` (${label})` : '';
+        }
+
+        async function loadProfilesWithAssignments() {
+            const [{ data: profiles, error: profilesError }, { data: rows }] = await Promise.all([
+                supabaseClient.from('profiles').select('id, email, first_name, last_name, instrument, role'),
+                supabaseClient.from('user_instruments').select('id, user_id, instrument_id, part_position, concert_set, created_at, instruments(name, is_section, is_percussion)')
+            ]);
+            assignmentDirectory = rows || [];
+            const byUser = {};
+            (rows || []).forEach(row => {
+                if (!byUser[row.user_id]) byUser[row.user_id] = [];
+                byUser[row.user_id].push(row);
+            });
+            (profiles || []).forEach(profile => {
+                profile.assignments = byUser[profile.id] || [];
+            });
+            return { profiles: profiles || [], error: profilesError };
+        }
+
+        function getGreekVocativeName(name) {
+            const trimmedName = (name || '').trim();
+            if (!trimmedName) return 'μουσικέ';
+
+            const normalizedName = trimmedName.toLocaleLowerCase('el-GR');
+            const irregularForms = {
+                'βασίλης': 'Βασίλη',
+                'γιαννης': 'Γιάννη',
+                'γιάννης': 'Γιάννη',
+                'δημήτρης': 'Δημήτρη',
+                'δημητρης': 'Δημήτρη',
+                'γιώργος': 'Γιώργο',
+                'γεώργιος': 'Γεώργιε',
+                'νίκος': 'Νίκο',
+                'παναγιώτης': 'Παναγιώτη',
+                'χρήστος': 'Χρήστο',
+                'χρηστος': 'Χρήστο',
+                'κωνσταντίνος': 'Κωνσταντίνε',
+                'ανδρέας': 'Ανδρέα',
+                'λουκάς': 'Λουκά',
+                'στέφανος': 'Στέφανε',
+                'στεφανος': 'Στέφανε',
+                'αλέξανδρος': 'Αλέξανδρε',
+                'αλεξανδρος': 'Αλέξανδρε',
+                'άγγελος': 'Άγγελε',
+                'αγγελος': 'Άγγελε',
+                'ευάγγελος': 'Ευάγγελε',
+                'ευαγγελος': 'Ευάγγελε',
+                'απόστολος': 'Απόστολε',
+                'αποστολος': 'Απόστολε',
+                'θεόδωρος': 'Θεόδωρε',
+                'θεοδωρος': 'Θεόδωρε',
+                'νικόλαος': 'Νικόλαε',
+                'νικολαος': 'Νικόλαε',
+                'φίλιππος': 'Φίλιππε',
+                'φιλιππος': 'Φίλιππε',
+                'στέλιος': 'Στέλιο',
+                'στελιος': 'Στέλιο',
+                'χαράλαμπος': 'Χαράλαμπε',
+                'χαραλαμπος': 'Χαράλαμπε',
+                'οδυσσέας': 'Οδυσσέα',
+                'οδυσσεας': 'Οδυσσέα'
+            };
+            if (irregularForms[normalizedName]) return irregularForms[normalizedName];
+
+            if (normalizedName.endsWith('ης') || normalizedName.endsWith('ας')) {
+                return trimmedName.slice(0, -1);
+            }
+            if (normalizedName.endsWith('ος')) {
+                const eSuffixes = ['στολος', 'νδρος', 'δωρος', 'λαος', 'τινος', 'ανος', 'γγελος', 'γελος', 'ιππος', 'λαμπος'];
+                if (eSuffixes.some(suffix => normalizedName.endsWith(suffix))
+                    || (normalizedName.endsWith('ιος') && normalizedName.length >= 8)) {
+                    return trimmedName.slice(0, -2) + 'ε';
+                }
+                return trimmedName.slice(0, -1);
+            }
+
+            return trimmedName;
+        }
+
+        function isOfficialAppHost() {
+            return OFFICIAL_APP_HOSTS.includes(location.hostname);
+        }
+
+        function unofficialAppMessage() {
+            return 'Αυτή δεν είναι η επίσημη εφαρμογή της Φιλαρμονικής. Μην εισάγετε κωδικό. Ανοίξτε μόνο την εφαρμογή από το εικονίδιο ή από ' + OFFICIAL_APP_ORIGIN;
+        }
+
+        function blockUnofficialApp() {
+            if (isOfficialAppHost()) return false;
+            currentUser = null;
+            currentProfile = null;
+            renderLogin();
+            return true;
+        }
+
+        function renderLogin(message = '') {
+            setAuthNarrow(true);
+            document.getElementById('navbar').classList.add('hidden');
+            if (!isOfficialAppHost()) {
+                document.getElementById('content').innerHTML = `
+                    <div class="flex flex-col items-center justify-center min-h-[85vh] text-center px-4">
+                        <img src="${LOGO_URL}" alt="Logo" class="w-24 h-24 mb-4 object-contain drop-shadow-md">
+                        <h1 class="text-2xl font-bold text-red-300 mb-3">Μη επίσημη εφαρμογή</h1>
+                        <p class="text-slate-200 text-sm leading-relaxed">${escapeHtml(unofficialAppMessage())}</p>
+                    </div>
+                `;
+                return;
+            }
+            document.getElementById('content').innerHTML = `
+                <div class="flex flex-col items-center justify-center min-h-[85vh] text-center">
+                    <img src="${LOGO_URL}" alt="Logo" class="w-24 h-24 mb-4 object-contain drop-shadow-md">
+                    <h1 class="text-2xl font-bold text-indigo-400 mb-1">Φιλαρμονική Ορχήστρα Θήβας</h1>
+                    <p class="text-slate-400 mb-6 text-sm">Συνδεθείτε για να συνεχίσετε</p>
+                    <div class="w-full bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+                        <input type="email" id="email" placeholder="Διεύθυνση Email" class="w-full mb-3 p-3 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-indigo-500">
+                        <input type="password" id="password" placeholder="Κωδικός πρόσβασης" class="w-full mb-4 p-3 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-indigo-500">
+                        <button onclick="handleLogin()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold p-3 rounded-lg transition text-sm">Σύνδεση</button>
+                        <button onclick="handleForgotPassword()" class="w-full mt-2 bg-transparent text-indigo-300 hover:text-white text-xs font-medium py-2">Ξεχάσατε τον κωδικό;</button>
+                    </div>
+                    <p id="error-msg" class="text-red-400 mt-4 text-sm">${escapeHtml(message)}</p>
+                    <p id="info-msg" class="text-emerald-400 mt-2 text-sm"></p>
+                    <p class="text-[11px] text-slate-500 mt-6">Επίσημη εφαρμογή: ${escapeHtml(OFFICIAL_APP_ORIGIN)}</p>
+                </div>
+            `;
+        }
+
+        function renderSetPasswordScreen(errorMessage = '') {
+            const isRecovery = passwordSetupMode === 'recovery';
+            const isChange = passwordSetupMode === 'change';
+            const title = isChange ? 'Αλλαγή κωδικού' : (isRecovery ? 'Νέος κωδικός πρόσβασης' : 'Δημιουργία κωδικού πρόσβασης');
+            const subtitle = isChange
+                ? 'Ορίστε τον νέο κωδικό για τον λογαριασμό σας.'
+                : (isRecovery
+                    ? 'Ορίστε έναν νέο κωδικό για να συνδεθείτε ξανά στην εφαρμογή.'
+                    : 'Καλώς ήρθατε. Ορίστε τον κωδικό σας για να ολοκληρώσετε την πρόσκληση.');
+            document.getElementById('navbar').classList.add('hidden');
+            setAuthNarrow(true);
+            document.getElementById('content').innerHTML = `
+                <div class="flex flex-col items-center justify-center min-h-[85vh] text-center">
+                    <img src="${LOGO_URL}" alt="Logo" class="w-20 h-20 mb-3 object-contain drop-shadow-md">
+                    <h1 class="text-2xl font-bold text-indigo-400 mb-2">${title}</h1>
+                    <p class="text-slate-400 mb-6 text-sm">${subtitle}</p>
+                    <div class="w-full bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+                        <input type="password" id="new-password" placeholder="Νέος κωδικός (τουλάχιστον 8 χαρακτήρες)" class="w-full mb-3 p-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-indigo-500 text-sm">
+                        <input type="password" id="new-password-confirm" placeholder="Επιβεβαίωση κωδικού" class="w-full mb-4 p-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-indigo-500 text-sm">
+                        <button onclick="handleSetPassword()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold p-3 rounded-lg transition text-sm">${isChange ? 'Αποθήκευση κωδικού' : 'Αποθήκευση & Είσοδος'}</button>
+                        ${isChange ? `<button onclick="requirePasswordSetup = false; passwordSetupMode = 'invite'; renderApp();" class="w-full mt-2 text-slate-400 text-xs py-2">Άκυρο</button>` : ''}
+                    </div>
+                    <p id="password-error-msg" class="text-red-400 mt-4 text-sm">${escapeHtml(errorMessage || '')}</p>
+                </div>
+            `;
+        }
+
+        async function handleSetPassword() {
+            const password = document.getElementById('new-password').value;
+            const confirm = document.getElementById('new-password-confirm').value;
+            const errEl = document.getElementById('password-error-msg');
+            if (!password || password.length < 8) {
+                errEl.innerText = 'Ο κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες.';
+                return;
+            }
+            if (password !== confirm) {
+                errEl.innerText = 'Οι δύο κωδικοί δεν ταιριάζουν.';
+                return;
+            }
+
+            const { error } = await supabaseClient.auth.updateUser({ password });
+            if (error) {
+                errEl.innerText = error.message === 'Auth session missing!'
+                    ? 'Ο σύνδεσμος έληξε ή δεν είναι έγκυρος. Ζητήστε νέα πρόσκληση ή επαναφορά κωδικού.'
+                    : error.message;
+                return;
+            }
+
+            requirePasswordSetup = false;
+            passwordSetupMode = 'invite';
+            clearAuthCallbackFromUrl();
+            showAppNotice('Ο κωδικός αποθηκεύτηκε.');
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session) {
+                currentUser = session.user;
+                await fetchProfile();
+                renderApp();
+            } else {
+                renderLogin('Ο κωδικός αποθηκεύτηκε. Συνδεθείτε με το email και τον νέο κωδικό.');
+            }
+        }
+
+        async function handleForgotPassword() {
+            if (!isOfficialAppHost()) {
+                renderLogin();
+                return;
+            }
+            const email = (document.getElementById('email')?.value || '').trim();
+            const errorEl = document.getElementById('error-msg');
+            const infoEl = document.getElementById('info-msg');
+            if (errorEl) errorEl.innerText = '';
+            if (infoEl) infoEl.innerText = '';
+            if (!email) {
+                if (errorEl) errorEl.innerText = 'Γράψτε πρώτα το email σας και πατήστε ξανά «Ξεχάσατε τον κωδικό;».';
+                return;
+            }
+            const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+                redirectTo: appRedirectUrl()
+            });
+            if (error) {
+                if (errorEl) errorEl.innerText = error.message;
+                return;
+            }
+            if (infoEl) infoEl.innerText = 'Σας στείλαμε email με σύνδεσμο για νέο κωδικό. Ελέγξτε τα εισερχόμενα (και τα ανεπιθύμητα).';
+        }
+
+        function startChangePassword() {
+            requirePasswordSetup = true;
+            passwordSetupMode = 'change';
+            renderSetPasswordScreen();
+        }
+
+        async function handleLogin() {
+            if (!isOfficialAppHost()) {
+                renderLogin();
+                return;
+            }
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+            if (error) {
+                document.getElementById('error-msg').innerText = 'Λανθασμένο email ή κωδικός πρόσβασης.';
+            }
+        }
+
+        async function handleLogout() {
+            await supabaseClient.auth.signOut();
+        }
+
+        let activeTab = 'home';
+        function switchTab(tab) {
+            if (tab !== 'music') musicTabShellReady = false;
+            activeTab = tab;
+            renderApp();
+        }
+
+        async function renderApp() {
+            if (blockUnofficialApp()) return;
+            setAuthNarrow(false);
+            document.getElementById('navbar').classList.remove('hidden');
+            ['music', 'events', 'home', 'attendance', 'profile'].forEach(t => {
+                const btn = document.getElementById(`nav-${t}`);
+                if (t === activeTab) {
+                    if (t !== 'home') {
+                        btn.className = "flex-1 flex flex-col items-center justify-center text-indigo-400 font-bold text-[10px] leading-tight h-12";
+                    }
+                } else {
+                    if (t !== 'home') {
+                        btn.className = "flex-1 flex flex-col items-center justify-center text-slate-400 font-medium text-[10px] leading-tight h-12";
+                    }
+                }
+            });
+
+            if (!currentProfile && currentUser) {
+                await fetchProfile();
+            }
+
+            if (activeTab === 'music') runTabLoad(renderMusicTab);
+            else if (activeTab === 'events') runTabLoad(renderEventsTab);
+            else if (activeTab === 'home') runTabLoad(renderHomeTab);
+            else if (activeTab === 'attendance') runTabLoad(renderAttendanceTab);
+            else if (activeTab === 'profile') runTabLoad(renderProfileTab);
+            else if (activeTab === 'notifications') runTabLoad(renderNotificationsTab);
+        }
+
+        async function renderHomeTab() {
+            const content = document.getElementById('content');
+            content.innerHTML = '<h2 class="text-2xl font-bold mb-4">Αρχική</h2><p class="text-slate-400 text-sm">Φόρτωση...</p>';
+
+            const [{ data: announcements, error: announcementsError }, { data: events, error: eventsError }] = await Promise.all([
+                supabaseClient.from('announcement_log').select('id, title, body, created_at').order('created_at', { ascending: false }).limit(3),
+                supabaseClient.from('band_events').select('id, event_name, event_type, date, time, location').gte('date', new Date().toISOString().split('T')[0]).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
+            ]);
+            sortEventsChronologically(events);
+
+            if (announcementsError || eventsError) {
+                content.innerHTML = `<p class="text-red-400 text-sm">Σφάλμα φόρτωσης αρχικής σελίδας: ${escapeHtml((announcementsError || eventsError).message)}</p>`;
+                return;
+            }
+
+            const firstName = currentProfile?.first_name || currentProfile?.name || 'μουσικέ';
+            const vocativeFirstName = getGreekVocativeName(firstName);
+            const nextEvent = (events || []).find(ev => !isRehearsalEvent(ev));
+            let html = `
+                <div class="flex items-center justify-between mb-5">
+                    <div>
+                        <p class="text-sm text-slate-400">Καλώς ήρθες,</p>
+                        <h1 class="text-2xl font-bold text-white">${escapeHtml(vocativeFirstName)}!</h1>
+                    </div>
+                </div>
+            `;
+
+            if (nextEvent) {
+                html += `
+                    <section class="bg-gradient-to-br from-indigo-700 to-indigo-900 p-4 rounded-2xl shadow-lg mb-4">
+                        <p class="text-xs text-indigo-200 uppercase font-semibold">Επόμενη εκδήλωση</p>
+                        <h2 class="text-xl font-bold text-white mt-1">${escapeHtml(nextEvent.event_name)}</h2>
+                        <p class="text-sm text-indigo-100 mt-2">📅 ${escapeHtml(formatGreekDateOnly(nextEvent.date))}${nextEvent.time ? ` · ${escapeHtml(formatEventTime(nextEvent.time))}` : ''}</p>
+                        ${nextEvent.location ? `<p class="text-xs text-indigo-200 mt-1">📍 ${formatEventLocation(nextEvent.location)}</p>` : ''}
+                        <button onclick="switchTab('events')" class="mt-3 bg-white/15 hover:bg-white/25 px-3 py-2 rounded-lg text-xs font-semibold text-white">Προβολή προγράμματος</button>
+                    </section>
+                `;
+            }
+
+            html += `
+                <div class="flex items-center justify-between mb-2">
+                    <h2 class="text-lg font-bold">Τελευταίες ανακοινώσεις</h2>
+                    <button onclick="switchTab('notifications')" class="text-xs text-indigo-300 hover:text-indigo-200 underline">Όλες</button>
+                </div>
+            `;
+            if (!announcements || announcements.length === 0) {
+                html += '<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">Δεν υπάρχουν ανακοινώσεις ακόμα.</div>';
+            } else {
+                html += '<div class="space-y-3">';
+                announcements.forEach(item => {
+                    html += `
+                        <article class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                            <h3 class="font-bold text-base text-white">${escapeHtml(item.title)}</h3>
+                            <p class="text-xs text-slate-500 mt-1">${escapeHtml(item.created_at ? new Date(item.created_at).toLocaleString('el-GR') : '')}</p>
+                            <p class="text-sm text-slate-200 mt-2 line-clamp-3 whitespace-pre-wrap">${escapeHtml(item.body)}</p>
+                        </article>
+                    `;
+                });
+                html += '</div>';
+            }
+            content.innerHTML = html;
+        }
+
+        async function renderNotificationsTab() {
+            const content = document.getElementById('content');
+            content.innerHTML = '<h2 class="text-2xl font-bold mb-4">Ανακοινώσεις</h2><p class="text-slate-400 text-sm">Φόρτωση ανακοινώσεων...</p>';
+
+            const { data: announcements, error } = await supabaseClient
+                .from('announcement_log')
+                .select('id, title, body, sent_by_email, created_at')
+                .order('created_at', { ascending: false });
+
+            if (error) {
+                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Ανακοινώσεις</h2><p class="text-red-400 text-sm">Σφάλμα φόρτωσης ανακοινώσεων: ${escapeHtml(error.message)}</p>`;
+                return;
+            }
+
+            let html = `
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-2xl font-bold">Ανακοινώσεις</h2>
+                </div>
+            `;
+
+            if (!announcements || announcements.length === 0) {
+                html += '<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">Δεν υπάρχουν ανακοινώσεις ακόμα.</div>';
+            } else {
+                html += '<div class="space-y-3">';
+                announcements.forEach(item => {
+                    const date = item.created_at ? new Date(item.created_at).toLocaleString('el-GR') : '';
+                    html += `
+                        <article class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                            <div class="flex items-start justify-between gap-2">
+                                <div>
+                                    <h3 class="font-bold text-base text-white">${escapeHtml(item.title)}</h3>
+                                    <p class="text-xs text-slate-500 mt-1">${escapeHtml(date)}</p>
+                                </div>
+                                ${isPrivilegedRole() ? `<button onclick="deleteAnnouncement(${Number(item.id)})" class="shrink-0 text-red-400 hover:text-red-300 text-xs underline">Διαγραφή</button>` : ''}
+                            </div>
+                            <p class="text-sm text-slate-200 mt-3 whitespace-pre-wrap">${escapeHtml(item.body)}</p>
+                        </article>
+                    `;
+                });
+                html += '</div>';
+            }
+            content.innerHTML = html;
+        }
+
+        async function deleteAnnouncement(id) {
+            if (!isPrivilegedRole()) {
+                showAppNotice('Μόνο οι διαχειριστές και ο μαέστρος μπορούν να διαγράφουν ανακοινώσεις.');
+                return;
+            }
+            const announcementId = Number(id);
+            if (!Number.isSafeInteger(announcementId) || announcementId <= 0) {
+                showAppNotice('Μη έγκυρη ανακοίνωση.');
+                return;
+            }
+            if (!await confirmAppAction('Να διαγραφεί οριστικά αυτή η ανακοίνωση;')) return;
+
+            const { error } = await supabaseClient
+                .from('announcement_log')
+                .delete()
+                .eq('id', announcementId);
+
+            if (error) {
+                showAppNotice('Σφάλμα διαγραφής ανακοίνωσης: ' + error.message);
+                return;
+            }
+            await renderNotificationsTab();
+        }
+
+        // --- MUSIC TAB ---
+        async function renderMusicTab() {
+            const content = document.getElementById('content');
+            const keepShell = musicTabShellReady && document.getElementById('music-results');
+            if (!keepShell) {
+                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Παρτιτούρες</h2><p class="text-slate-400 text-sm">Φόρτωση βιβλιοθήκης...</p>`;
+            }
+
+            let musicQuery = await supabaseClient
+                .from('music_library')
+                .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id, instruments(name))');
+            if (musicQuery.error) {
+                musicQuery = await supabaseClient
+                    .from('music_library')
+                    .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id)');
+            }
+
+            if (musicQuery.error) {
+                musicTabShellReady = false;
+                content.innerHTML = `<p class="text-red-400 text-sm">Σφάλμα φόρτωσης: ${escapeHtml(musicQuery.error.message)}</p>`;
+                return;
+            }
+            const music = musicQuery.data;
+
+            musicLibraryCache = music || [];
+            if (!keepShell) {
+                await buildMusicTabShell(content, musicLibraryCache);
+                musicTabShellReady = true;
+            }
+            paintMusicResults();
+        }
+
+        function filteredMusicRows() {
+            const pool = musicLibraryCache.slice();
+            const allSets = [...new Set(pool.map(m => (m.concert_set || '').trim()).filter(Boolean))].sort();
+            const partNames = [...new Set(pool.map(m => musicPartLabel(m)).filter(Boolean))].sort();
+            let displayed = pool.slice();
+
+            if (canFilterMusicInstruments() && musicFilter.instrument && musicFilter.instrument !== 'all') {
+                displayed = displayed.filter(m => musicPartLabel(m) === musicFilter.instrument);
+            }
+            if (musicFilter.set && musicFilter.set !== 'all') {
+                displayed = displayed.filter(m => (m.concert_set || '').trim() === musicFilter.set);
+            }
+            if (musicFilter.search && musicFilter.search.trim()) {
+                const q = musicFilter.search.trim().toLowerCase();
+                displayed = displayed.filter(m =>
+                    (m.piece_title || '').toLowerCase().includes(q) ||
+                    (m.composer || '').toLowerCase().includes(q) ||
+                    musicPartLabel(m).toLowerCase().includes(q) ||
+                    (m.concert_set || '').toLowerCase().includes(q)
+                );
+            }
+            displayed.sort((a, b) => {
+                const title = (a.piece_title || '').localeCompare(b.piece_title || '', 'el', { sensitivity: 'base' });
+                if (title !== 0) return title;
+                const composer = (a.composer || '').localeCompare(b.composer || '', 'el', { sensitivity: 'base' });
+                if (composer !== 0) return composer;
+                // Later: secondary key should be full-score instrument order from the complete list.
+                return musicPartLabel(a).localeCompare(musicPartLabel(b), 'el', { sensitivity: 'base' });
+            });
+            return { displayed, allSets, partNames, poolCount: pool.length };
+        }
+
+        async function buildMusicTabShell(content, music) {
+            const labels = assignmentLabels();
+            const instrumentLine = isConductorRole()
+                ? 'Μαέστρος'
+                : isAdminRole()
+                    ? 'Διαχειριστής'
+                    : (labels.join(', ') || 'Χωρίς ανάθεση οργάνου');
+            const { allSets, partNames } = filteredMusicRows();
+
+            let html = `
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <h2 class="text-2xl font-bold">Παρτιτούρες</h2>
+                        <p class="text-xs text-indigo-300">${escapeHtml(instrumentLine)}</p>
+                    </div>
+                </div>
+                <div class="bg-slate-800 p-3 rounded-xl border border-slate-700 mb-3 space-y-2">
+                    <div class="relative">
+                        <input type="search" id="mf-search" value="${escapeHtml(musicFilter.search)}" placeholder="🔍 Αναζήτηση τίτλου, συνθέτη..."
+                            class="w-full p-2 pr-10 bg-slate-900 border border-slate-700 rounded text-sm text-white [appearance:textfield] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden">
+                        <button type="button" id="mf-search-clear" aria-label="Καθαρισμός αναζήτησης"
+                            class="${musicFilter.search.trim() ? '' : 'hidden '}absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 flex items-center justify-center rounded-md text-slate-300 hover:text-white hover:bg-slate-700 text-xl leading-none">
+                            ×
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        ${canFilterMusicInstruments() ? `
+                        <select id="mf-instrument" class="p-2 bg-slate-900 border border-slate-700 rounded text-xs text-white">
+                            <option value="all">${hasPercussionAllAssignment() && !isPrivilegedRole() ? 'Percussion Section' : `Όλα τα μέρη (${partNames.length})`}</option>
+                            ${partNames.filter(ins => !(hasPercussionAllAssignment() && !isPrivilegedRole() && (ins === 'Percussion (all)' || ins === 'Percussion Section'))).map(ins => `<option value="${escapeHtml(ins)}" ${musicFilter.instrument === ins ? 'selected':''}>${escapeHtml(ins)}</option>`).join('')}
+                        </select>
+                        ` : '<div></div>'}
+                        <select id="mf-set" class="p-2 bg-slate-900 border border-slate-700 rounded text-xs text-white">
+                            <option value="all">Όλα τα σετ (${allSets.length})</option>
+                            ${allSets.map(s => `<option value="${escapeHtml(s)}" ${musicFilter.set === s ? 'selected':''}>${escapeHtml(s)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div id="music-count" class="text-[10px] text-slate-500 pt-0.5"></div>
+                </div>
+                <div id="music-results"></div>
+            `;
+
+            if (isAdminRole()) {
+                const { data: instruments } = await supabaseClient
+                    .from('instruments')
+                    .select('id, name, max_regular_parts, sort_order, is_section, is_percussion')
+                    .order('sort_order');
+                window.canonicalInstruments = (instruments || []).filter(ins => !ins.is_section);
+                html += `
+                    <div class="mt-8 bg-slate-800 p-4 rounded-xl border border-slate-700">
+                        <h3 class="font-bold text-sm text-indigo-400 mb-3">Διαχειριστής: Προσθήκη Παρτιτούρας</h3>
+                        <input type="text" id="m-title" placeholder="Τίτλος Κομματιού" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                        <input type="text" id="m-composer" placeholder="Συνθέτης" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                        <input type="text" id="m-set" placeholder="Σετ συναυλίας (υποχρεωτικό)" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                        <select id="m-instrument" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white" onchange="refreshAdminPartOptions()">
+                            <option value="">Επιλέξτε όργανο</option>
+                            ${(window.canonicalInstruments || []).map(ins => `<option value="${ins.id}" data-max="${ins.max_regular_parts}">${escapeHtml(ins.name)}</option>`).join('')}
+                        </select>
+                        <select id="m-part-kind" class="w-full mb-3 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                            <option value="unnumbered">Απλό μέρος (χωρίς αριθμό)</option>
+                        </select>
+                        <div class="mb-3">
+                            <label class="text-[10px] text-slate-400 block mb-1">Αρχείο PDF (Supabase Storage)</label>
+                            <input type="file" id="m-file" accept="application/pdf" class="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500">
+                        </div>
+                        <button onclick="addMusic()" class="w-full bg-emerald-600 hover:bg-emerald-500 py-2.5 rounded font-semibold text-sm">Μεταφόρτωση & Προσθήκη</button>
+                    </div>
+                `;
+            }
+
+            content.innerHTML = html;
+            const search = document.getElementById('mf-search');
+            const searchClear = document.getElementById('mf-search-clear');
+            const syncSearchClear = () => {
+                if (!searchClear) return;
+                searchClear.classList.toggle('hidden', !(search?.value || '').trim());
+            };
+            if (search) {
+                search.addEventListener('input', (event) => {
+                    musicFilter.search = event.target.value;
+                    syncSearchClear();
+                    paintMusicResults();
+                });
+            }
+            if (searchClear && search) {
+                searchClear.addEventListener('click', () => {
+                    search.value = '';
+                    musicFilter.search = '';
+                    syncSearchClear();
+                    paintMusicResults();
+                    search.focus();
+                });
+            }
+            const instrumentSelect = document.getElementById('mf-instrument');
+            if (instrumentSelect) {
+                instrumentSelect.addEventListener('change', (event) => {
+                    musicFilter.instrument = event.target.value;
+                    paintMusicResults();
+                });
+            }
+            const setSelect = document.getElementById('mf-set');
+            if (setSelect) {
+                setSelect.addEventListener('change', (event) => {
+                    musicFilter.set = event.target.value;
+                    paintMusicResults();
+                });
+            }
+            refreshAdminPartOptions();
+        }
+
+        function paintMusicResults() {
+            const results = document.getElementById('music-results');
+            const count = document.getElementById('music-count');
+            if (!results) return;
+            const { displayed, poolCount } = filteredMusicRows();
+            if (count) count.textContent = `${displayed.length} από ${poolCount} παρτιτούρες`;
+
+            if (!displayed.length) {
+                const emptyMessage = musicLibraryCache.length === 0
+                    ? (assignmentLabels().length
+                        ? 'Δεν υπάρχουν διαθέσιμες παρτιτούρες για την ανάθεσή σας ακόμα.'
+                        : 'Δεν έχει οριστεί όργανο στο προφίλ σας.')
+                    : 'Καμία παρτιτούρα δεν ταιριάζει με τα φίλτρα σας.';
+                results.innerHTML = `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">${emptyMessage}</div>`;
+                return;
+            }
+
+            results.innerHTML = `<div class="space-y-3">${displayed.map(item => {
+                const filePath = item.pdf_link;
+                return `
+                    <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 flex justify-between items-center">
+                        <div class="min-w-0">
+                            <h3 class="font-bold text-base text-white truncate">${escapeHtml(item.piece_title)}</h3>
+                            <p class="text-xs text-slate-400 truncate">${escapeHtml(item.composer || 'Άγνωστος Συνθέτης')} • ${escapeHtml(musicPartLabel(item))}</p>
+                        </div>
+                        <div class="flex space-x-1.5 shrink-0 ml-2">
+                            ${filePath ? `
+                            <button type="button" onclick="shareSheetPdf('${encodeURIComponent(filePath)}', '${encodeURIComponent(item.piece_title || 'partitura')}')" class="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100" aria-label="Κοινοποίηση παρτιτούρας" title="Κοινοποίηση">
+                                <svg aria-hidden="true" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.5"></circle><circle cx="6" cy="12" r="2.5"></circle><circle cx="18" cy="19" r="2.5"></circle><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6"></path></svg>
+                            </button>
+                            <button type="button" onclick="openSecurePdf('${encodeURIComponent(filePath)}', ${Number(item.id)})" class="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white" aria-label="Άνοιγμα παρτιτούρας" title="Άνοιγμα">
+                                <svg aria-hidden="true" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h7l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M13 3v5h5"></path></svg>
+                            </button>` : ''}
+                        </div>
+                    </div>`;
+            }).join('')}</div>`;
+        }
+
+        function refreshAdminPartOptions() {
+            const instrumentSelect = document.getElementById('m-instrument');
+            const partSelect = document.getElementById('m-part-kind');
+            if (!instrumentSelect || !partSelect) return;
+            const selected = (window.canonicalInstruments || []).find(ins => ins.id === instrumentSelect.value);
+            const maxParts = selected ? Number(selected.max_regular_parts) : 1;
+            const options = [['unnumbered', 'Απλό μέρος (χωρίς αριθμό)']];
+            if (maxParts >= 2) {
+                options.push(['1', 'Μέρος 1'], ['2', 'Μέρος 2']);
+            }
+            if (maxParts >= 3) options.push(['3', 'Μέρος 3']);
+            options.push(['beginner', 'Μέρος αρχαρίων']);
+            partSelect.innerHTML = options.map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
+        }
+
+        async function ensureMusicalPart(instrumentId, kind) {
+            const instrument = (window.canonicalInstruments || []).find(ins => ins.id === instrumentId);
+            if (!instrument) throw new Error('Άγνωστο όργανο.');
+            const isBeginner = kind === 'beginner';
+            const partPosition = kind === 'unnumbered' || isBeginner ? null : Number(kind);
+            const displayName = isBeginner
+                ? `${instrument.name} (beginner)`
+                : partPosition ? `${instrument.name} ${partPosition}` : instrument.name;
+
+            let query = supabaseClient
+                .from('musical_parts')
+                .select('id, display_name')
+                .eq('instrument_id', instrumentId)
+                .eq('is_beginner', isBeginner);
+            query = partPosition === null ? query.is('part_position', null) : query.eq('part_position', partPosition);
+            const { data: existing, error: lookupError } = await query.maybeSingle();
+            if (lookupError) throw lookupError;
+            if (existing) return existing;
+
+            const { data: created, error: insertError } = await supabaseClient
+                .from('musical_parts')
+                .insert([{ instrument_id: instrumentId, part_position: partPosition, is_beginner: isBeginner, display_name: displayName }])
+                .select('id, display_name')
+                .single();
+            if (insertError) throw insertError;
+            return created;
+        }
+
+        async function addMusic() {
+            if (!isAdminRole()) {
+                showAppNotice('Μόνο οι διαχειριστές μπορούν να μεταφορτώνουν παρτιτούρες.');
+                return;
+            }
+            const piece_title = document.getElementById('m-title').value.trim();
+            const composer = document.getElementById('m-composer').value.trim();
+            const concert_set = document.getElementById('m-set').value.trim();
+            const instrumentId = document.getElementById('m-instrument').value;
+            const partKind = document.getElementById('m-part-kind').value;
+            const fileInput = document.getElementById('m-file');
+
+            if (!piece_title || !concert_set || !instrumentId || !fileInput.files || fileInput.files.length === 0) {
+                showAppNotice('Παρακαλώ συμπληρώστε τίτλο, σετ, όργανο και αρχείο PDF.');
+                return;
+            }
+
+            try {
+                const part = await ensureMusicalPart(instrumentId, partKind);
+                const file = fileInput.files[0];
+                const fileExt = file.name.split('.').pop();
+                const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`;
+                const filePath = `scores/${fileName}`;
+
+                const { error: uploadError } = await supabaseClient.storage
+                    .from('sheet-music')
+                    .upload(filePath, file);
+                if (uploadError) throw uploadError;
+
+                const { error: dbError } = await supabaseClient.from('music_library').insert([{
+                    piece_title,
+                    composer,
+                    concert_set,
+                    instrument_part: part.display_name,
+                    pdf_link: filePath,
+                    musical_part_id: part.id
+                }]);
+                if (dbError) throw dbError;
+
+                musicTabShellReady = false;
+                showAppNotice('Η παρτιτούρα μεταφορτώθηκε επιτυχώς!');
+                renderMusicTab();
+            } catch (error) {
+                showAppNotice('Σφάλμα αποθήκευσης: ' + error.message);
+            }
+        }
+
+        async function openSecurePdf(filePath, pieceId) {
+            filePath = decodeURIComponent(filePath);
+            const { data, error } = await supabaseClient.storage
+                .from('sheet-music')
+                .createSignedUrl(filePath, 60);
+
+            if (error || !data?.signedUrl) {
+                showAppNotice('Σφάλμα πρόσβασης στο αρχείο: ' + (error?.message || 'Άγνωστο σφάλμα'));
+                return;
+            }
+
+            openPdfViewer(data.signedUrl, pieceId);
+        }
+
+        function safePdfFileName(title) {
+            const base = String(title || 'partitura').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'partitura';
+            return `${base.slice(0, 80)}.pdf`;
+        }
+
+        async function fetchSignedPdfFile(filePath, title) {
+            const path = decodeURIComponent(filePath);
+            const { data, error } = await supabaseClient.storage
+                .from('sheet-music')
+                .createSignedUrl(path, 60);
+            if (error || !data?.signedUrl) {
+                throw new Error(error?.message || 'Άγνωστο σφάλμα');
+            }
+            const res = await fetch(data.signedUrl);
+            if (!res.ok) throw new Error('Αδυναμία λήψης του PDF.');
+            const blob = await res.blob();
+            const original = new File([blob], safePdfFileName(title), { type: 'application/pdf' });
+            return stampSharedPdfFile(original);
+        }
+
+        async function loadPdfLib() {
+            if (window.PDFLib) return window.PDFLib;
+            await new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js';
+                script.onload = resolve;
+                script.onerror = () => reject(new Error('Αδυναμία φόρτωσης εργαλείου υδατογραφήματος.'));
+                document.head.appendChild(script);
+            });
+            if (!window.PDFLib) throw new Error('Αδυναμία φόρτωσης εργαλείου υδατογραφήματος.');
+            return window.PDFLib;
+        }
+
+        async function watermarkStripPngBytes(width, height) {
+            const scale = 3;
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.ceil(width * scale));
+            canvas.height = Math.max(1, Math.ceil(height * scale));
+            const ctx = canvas.getContext('2d');
+            ctx.scale(scale, scale);
+            applyWatermarks(ctx, width, height, { baselineBottom: true });
+            const blob = await new Promise((resolve, reject) => {
+                canvas.toBlob((part) => (part ? resolve(part) : reject(new Error('Αδυναμία δημιουργίας υδατογραφήματος.'))), 'image/png');
+            });
+            return new Uint8Array(await blob.arrayBuffer());
+        }
+
+        async function stampSharedPdfFile(file) {
+            const PDFLib = await loadPdfLib();
+            const pdfDoc = await PDFLib.PDFDocument.load(await file.arrayBuffer());
+            const pngByKey = new Map();
+            for (const page of pdfDoc.getPages()) {
+                const { width } = page.getSize();
+                const stripH = Math.max(30, Math.min(42, width / 18));
+                const key = `${Math.round(width)}:${Math.round(stripH * 10)}`;
+                let pngBytes = pngByKey.get(key);
+                if (!pngBytes) {
+                    pngBytes = await watermarkStripPngBytes(width, stripH);
+                    pngByKey.set(key, pngBytes);
+                }
+                const image = await pdfDoc.embedPng(pngBytes);
+                page.drawImage(image, { x: 0, y: 0, width, height: stripH });
+            }
+            const stamped = await pdfDoc.save();
+            return new File([stamped], file.name, { type: 'application/pdf' });
+        }
+
+        async function shareSheetPdf(filePath, encodedTitle) {
+            const title = decodeURIComponent(encodedTitle || 'partitura');
+            try {
+                const file = await fetchSignedPdfFile(filePath, title);
+                if (navigator.share && navigator.canShare?.({ files: [file] })) {
+                    await navigator.share({ files: [file], title, text: title });
+                    return;
+                }
+                const url = URL.createObjectURL(file);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = file.name;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+            } catch (e) {
+                if (e?.name === 'AbortError') return;
+                showAppNotice('Αδυναμία κοινοποίησης: ' + (e.message || 'Άγνωστο σφάλμα'));
+            }
+        }
+
+        async function requestPdfWakeLock() {
+            try {
+                if (pdfWakeLock) return;
+                if (!('wakeLock' in navigator)) return;
+                pdfWakeLock = await navigator.wakeLock.request('screen');
+                pdfWakeLock.addEventListener('release', () => { pdfWakeLock = null; });
+            } catch (error) {
+                pdfWakeLock = null;
+            }
+        }
+
+        async function releasePdfWakeLock() {
+            try {
+                await pdfWakeLock?.release();
+            } catch (error) {
+                /* ignore */
+            }
+            pdfWakeLock = null;
+        }
+
+        function confirmDiscardAnnotations() {
+            return new Promise((resolve) => {
+                const existing = document.getElementById('annotation-exit-dialog');
+                if (existing) existing.remove();
+                const host = document.getElementById('pdf-viewer-container') || document.body;
+                const dialog = document.createElement('div');
+                dialog.id = 'annotation-exit-dialog';
+                dialog.className = 'absolute inset-0 z-[10000] bg-black/60 flex items-center justify-center p-4';
+                dialog.innerHTML = `
+                    <div class="bg-slate-800 border border-slate-600 rounded-2xl p-4 w-full max-w-sm">
+                        <p class="text-sm text-slate-100 mb-4">Έχετε μη αποθηκευμένες σημειώσεις. Θέλετε να τις αποθηκεύσετε πριν κλείσετε την παρτιτούρα;</p>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button type="button" id="ann-exit-no" class="py-2.5 rounded-lg bg-slate-700 text-white text-sm font-semibold">Όχι</button>
+                            <button type="button" id="ann-exit-yes" class="py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold">Ναι</button>
+                        </div>
+                    </div>`;
+                host.appendChild(dialog);
+                dialog.querySelector('#ann-exit-no').onclick = () => { dialog.remove(); resolve(false); };
+                dialog.querySelector('#ann-exit-yes').onclick = () => { dialog.remove(); resolve(true); };
+            });
+        }
+
+        function bindViewerCanvases() {
+            pdfCanvas = document.getElementById('pdf-canvas');
+            pdfCtx = pdfCanvas.getContext('2d');
+            highlightCanvas = document.getElementById('highlight-canvas');
+            highlightCtx = highlightCanvas.getContext('2d');
+            drawCanvas = document.getElementById('draw-canvas');
+            drawCtx = drawCanvas.getContext('2d');
+            scoreStage = document.getElementById('score-stage');
+        }
+
+        function wipeViewerSurfaces() {
+            bindViewerCanvases();
+            [pdfCanvas, drawCanvas, highlightCanvas].forEach(canvas => {
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                canvas.width = 1;
+                canvas.height = 1;
+                canvas.style.width = '0px';
+                canvas.style.height = '0px';
+            });
+            Object.keys(pageAnnotations).forEach(page => delete pageAnnotations[page]);
+            annotationHistory = [];
+            annotationRedoHistory = [];
+            lastPdfFitWidth = 0;
+        }
+
+        function setPdfLoadingCover(visible) {
+            document.getElementById('pdf-loading-cover')?.classList.toggle('hidden', !visible);
+        }
+
+        async function openPdfViewer(pdfUrl, pieceId) {
+            if (!viewerHistoryActive) {
+                history.pushState({ ...(history.state || {}), pdfViewer: true }, '');
+                viewerHistoryActive = true;
+            }
+            activePieceId = pieceId;
+            pageNum = 1;
+            annotationsDirty = false;
+            wipeViewerSurfaces();
+            setPdfLoadingCover(true);
+            document.getElementById('pdf-viewer-container').classList.remove('hidden');
+            document.getElementById('pdf-viewer-container').classList.remove('reader-mode');
+            document.documentElement.classList.add('pdf-open');
+            updateViewerToggleIcon(false);
+            setViewportMeta(true);
+
+            bindViewerCanvases();
+            scoreStage.style.transformOrigin = 'top center';
+
+            setupDrawingEvents();
+            setupScoreGestures();
+            setTool('hand');
+            requestPdfWakeLock();
+
+            try {
+                const loadingTask = pdfjsLib.getDocument(pdfUrl);
+                pdfDoc = await loadingTask.promise;
+                await renderPage(pageNum);
+                await loadSavedAnnotations();
+                setPdfLoadingCover(false);
+                requestAnimationFrame(() => schedulePdfRefit());
+            } catch (error) {
+                showAppNotice('Σφάλμα φόρτωσης PDF: ' + error.message);
+                closePdfViewer();
+            }
+        }
+
+        async function closePdfViewer(fromHistory = false) {
+            const viewer = document.getElementById('pdf-viewer-container');
+            if (!viewer || viewer.classList.contains('hidden') || pdfViewerClosing) return;
+            pdfViewerClosing = true;
+            try {
+                if (annotationsDirty) {
+                    const shouldSave = await confirmDiscardAnnotations();
+                    if (shouldSave) persistAnnotations();
+                    else annotationsDirty = false;
+                }
+                if (!fromHistory && viewerHistoryActive) {
+                    viewerHistoryActive = false;
+                    history.back();
+                } else {
+                    viewerHistoryActive = false;
+                }
+                document.getElementById('annotation-exit-dialog')?.remove();
+                setPdfLoadingCover(true);
+                wipeViewerSurfaces();
+                document.documentElement.classList.remove('pdf-open');
+                await releasePdfWakeLock();
+                await exitPdfFullscreen();
+                setViewportMeta(false);
+                viewer.classList.add('hidden');
+                pdfDoc = null;
+                pageNum = 1;
+                activePieceId = null;
+                pinchStartDistance = null;
+                pinchStartZoom = null;
+                pinchStartMidpoint = null;
+                panX = 0;
+                panY = 0;
+                lastScoreTapAt = 0;
+                annotationsDirty = false;
+            } finally {
+                pdfViewerClosing = false;
+            }
+        }
+
+        async function renderPage(num) {
+            if (!pdfDoc) return;
+            pageRendering = true;
+            ignorePdfRefitEvents(700);
+            try {
+                const page = await pdfDoc.getPage(num);
+                const baseViewport = page.getViewport({ scale: 1 });
+                const availableWidth = viewerFitWidth();
+                minimumScoreScale = Math.max(0.5, availableWidth / baseViewport.width);
+                scale = minimumScoreScale;
+                const viewport = page.getViewport({ scale: scale });
+                const outputScale = pdfOutputScale(viewport.width, viewport.height);
+                const pixelWidth = Math.max(1, Math.floor(viewport.width * outputScale));
+                const pixelHeight = Math.max(1, Math.floor(viewport.height * outputScale));
+
+                if (!pdfScratchCanvas) pdfScratchCanvas = document.createElement('canvas');
+                if (pdfScratchCanvas.width !== pixelWidth) pdfScratchCanvas.width = pixelWidth;
+                if (pdfScratchCanvas.height !== pixelHeight) pdfScratchCanvas.height = pixelHeight;
+                const scratchCtx = pdfScratchCanvas.getContext('2d', { alpha: false });
+                scratchCtx.setTransform(1, 0, 0, 1, 0, 0);
+                scratchCtx.fillStyle = '#ffffff';
+                scratchCtx.fillRect(0, 0, pixelWidth, pixelHeight);
+                await page.render({
+                    canvasContext: scratchCtx,
+                    viewport,
+                    transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null
+                }).promise;
+                scratchCtx.save();
+                scratchCtx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+                applyWatermarks(scratchCtx, viewport.width, viewport.height);
+                scratchCtx.restore();
+
+                resizeCanvasBuffer(pdfCanvas, pixelWidth, pixelHeight, viewport.width, viewport.height);
+                pdfCtx = pdfCanvas.getContext('2d');
+                pdfCtx.setTransform(1, 0, 0, 1, 0, 0);
+                pdfCtx.drawImage(pdfScratchCanvas, 0, 0);
+
+                resizeCanvasBuffer(drawCanvas, pixelWidth, pixelHeight, viewport.width, viewport.height);
+                resizeCanvasBuffer(highlightCanvas, pixelWidth, pixelHeight, viewport.width, viewport.height);
+                drawCtx = drawCanvas.getContext('2d');
+                highlightCtx = highlightCanvas.getContext('2d');
+
+                lastPdfFitWidth = availableWidth;
+                showPageIndicator(num);
+                scoreZoom = 1;
+                panX = 0;
+                panY = 0;
+                scoreStage.style.transformOrigin = 'top center';
+                applyScoreZoom();
+                ignorePdfRefitEvents(450);
+            } finally {
+                pageRendering = false;
+                scoreStage?.classList.remove('pdf-resizing');
+            }
+        }
+
+        function playPageTurnHint(dir) {
+            if (!scoreStage || !dir) return;
+            if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+            const shift = dir > 0 ? 18 : -18;
+            scoreStage.style.transition = 'none';
+            scoreStage.style.opacity = '0.88';
+            scoreStage.style.transform = `translate3d(${shift}px, 0, 0) scale(1)`;
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    scoreStage.style.transition = 'transform 110ms ease-out, opacity 110ms ease-out';
+                    scoreStage.style.opacity = '1';
+                    applyScoreZoom();
+                    scoreStage.addEventListener('transitionend', () => {
+                        scoreStage.style.transition = '';
+                        scoreStage.style.opacity = '1';
+                    }, { once: true });
+                });
+            });
+        }
+
+        function showPageIndicator(num) {
+            const indicator = document.getElementById('page-indicator');
+            const display = document.getElementById('page-num-display');
+            if (!indicator || !display || !pdfDoc) return;
+            display.innerText = `${num} / ${pdfDoc.numPages}`;
+            indicator.classList.add('visible');
+            clearTimeout(pageIndicatorTimer);
+            pageIndicatorTimer = setTimeout(() => indicator.classList.remove('visible'), 1800);
+        }
+
+        function applyScoreZoom() {
+            if (!scoreStage) return;
+            clampPan();
+            const atRest = scoreZoom <= 1.001 && Math.abs(panX) < 0.5 && Math.abs(panY) < 0.5;
+            scoreStage.style.transform = atRest
+                ? 'none'
+                : `translate3d(${panX}px, ${panY}px, 0) scale(${scoreZoom})`;
+        }
+
+        function clampPan() {
+            if (!scoreStage) return;
+            const wrapper = document.getElementById('canvas-wrapper');
+            const maxX = Math.max(0, (scoreStage.offsetWidth * scoreZoom - wrapper.clientWidth) / 2);
+            const maxY = Math.max(0, scoreStage.offsetHeight * scoreZoom - wrapper.clientHeight);
+            panX = Math.min(maxX, Math.max(-maxX, panX));
+            panY = Math.min(0, Math.max(-maxY, panY));
+        }
+
+        function springScoreToFit() {
+            if (!scoreStage || scoreZoom >= 1) return;
+            scoreStage.classList.add('score-spring-back');
+            scoreStage.style.transformOrigin = 'top center';
+            scoreZoom = 1;
+            panX = 0;
+            panY = 0;
+            applyScoreZoom();
+            scoreStage.addEventListener('transitionend', () => {
+                scoreStage.classList.remove('score-spring-back');
+            }, { once: true });
+        }
+
+        function toggleViewerChrome() {
+            const viewer = document.getElementById('pdf-viewer-container');
+            viewer.classList.toggle('reader-mode');
+            updateViewerToggleIcon(viewer.classList.contains('reader-mode'));
+        }
+
+        function updateViewerToggleIcon(hidden) {
+            const button = document.getElementById('viewer-show-controls');
+            if (!button) return;
+            button.setAttribute('aria-label', hidden ? 'Εμφάνιση εργαλείων' : 'Απόκρυψη εργαλείων');
+            button.innerHTML = !hidden
+                ? '<svg aria-hidden="true" class="h-5 w-5 mx-auto" viewBox="0 0 256 256" fill="currentColor"><path d="M53.92,34.62A8,8,0,1,0,42.08,45.38L61.32,66.55C25,88.84,9.38,123.2,8.69,124.76a8,8,0,0,0,0,6.5c.35.79,8.82,19.57,27.65,38.4C61.43,194.74,93.12,208,128,208a127.11,127.11,0,0,0,52.07-10.83l22,24.21a8,8,0,1,0,11.84-10.76Zm47.33,75.84,41.67,45.85a32,32,0,0,1-41.67-45.85ZM128,192c-30.78,0-57.67-11.19-79.93-33.25A133.16,133.16,0,0,1,25,128c4.69-8.79,19.66-33.39,47.35-49.38l18,19.75a48,48,0,0,0,63.66,70l14.73,16.2A112,112,0,0,1,128,192Zm6-95.43a8,8,0,0,1,3-15.72,48.16,48.16,0,0,1,38.77,42.64,8,8,0,0,1-7.22,8.71,6.39,6.39,0,0,1-.75,0,8,8,0,0,1-8-7.26A32.09,32.09,0,0,0,134,96.57Zm113.28,34.69c-.42.94-10.55,23.37-33.36,43.8a8,8,0,1,1-10.67-11.92A132.77,132.77,0,0,0,231.05,128a133.15,133.15,0,0,0-23.12-30.77C185.67,75.19,158.78,64,128,64a118.37,118.37,0,0,0-19.36,1.57A8,8,0,1,1,106,49.79,134,134,0,0,1,128,48c34.88,0,66.57,13.26,91.66,38.35,18.83,18.83,27.3,37.62,27.65,38.41A8,8,0,0,1,247.31,131.26Z"></path></svg>'
+                : '<svg aria-hidden="true" class="h-5 w-5 mx-auto" viewBox="0 0 256 256" fill="currentColor"><path d="M247.31,124.76c-.35-.79-8.82-19.58-27.65-38.41C194.57,61.26,162.88,48,128,48S61.43,61.26,36.34,86.35C17.51,105.18,9,124,8.69,124.76a8,8,0,0,0,0,6.5c.35.79,8.82,19.57,27.65,38.4C61.43,194.74,93.12,208,128,208s66.57-13.26,91.66-38.34c18.83-18.83,27.3-37.61,27.65-38.4A8,8,0,0,0,247.31,124.76ZM128,192c-30.78,0-57.67-11.19-79.93-33.25A133.47,133.47,0,0,1,25,128,133.33,133.33,0,0,1,48.07,97.25C70.33,75.19,97.22,64,128,64s57.67,11.19,79.93,33.25A133.46,133.46,0,0,1,231.05,128C223.84,141.46,192.43,192,128,192Zm0-112a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Z"></path></svg>';
+        }
+
+        function toggleScoreZoom(x, y) {
+            scoreStage.style.transformOrigin = 'top center';
+            scoreZoom = scoreZoom > 1.01 ? 1 : 2;
+            if (scoreZoom === 1) {
+                panX = 0;
+                panY = 0;
+            }
+            applyScoreZoom();
+        }
+
+        function getTouchMidpoint(touches) {
+            return {
+                x: (touches[0].clientX + touches[1].clientX) / 2,
+                y: (touches[0].clientY + touches[1].clientY) / 2
+            };
+        }
+
+        function getTouchDistance(touches) {
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+            return Math.hypot(dx, dy);
+        }
+
+        function setupScoreGestures() {
+            const wrapper = document.getElementById('canvas-wrapper');
+            wrapper.ontouchstart = (event) => {
+                if (event.touches.length === 1 && currentTool === 'hand' && scoreStage && scoreStage.contains(event.target)) {
+                    const touch = event.touches[0];
+                    handStartX = touch.clientX;
+                    handStartY = touch.clientY;
+                    handStartPanX = panX;
+                    handStartPanY = panY;
+                    handMoved = false;
+                    pageSwipeStartX = scoreZoom <= 1.02 ? touch.clientX : null;
+                    pageSwipeStartY = scoreZoom <= 1.02 ? touch.clientY : null;
+                    touchGestureActive = true;
+                    return;
+                }
+                if (event.touches.length !== 2) return;
+                event.preventDefault();
+                isDrawing = false;
+                touchGestureActive = true;
+                pinchStartDistance = getTouchDistance(event.touches);
+                pinchStartZoom = scoreZoom;
+                pinchStartMidpoint = getTouchMidpoint(event.touches);
+                panStartX = panX;
+                panStartY = panY;
+                scoreStage.style.transformOrigin = 'top center';
+            };
+            wrapper.ontouchmove = (event) => {
+                if (event.touches.length === 1 && currentTool === 'hand' && touchGestureActive) {
+                    event.preventDefault();
+                    panX = handStartPanX + event.touches[0].clientX - handStartX;
+                    panY = handStartPanY + event.touches[0].clientY - handStartY;
+                    handMoved = Math.hypot(event.touches[0].clientX - handStartX, event.touches[0].clientY - handStartY) > 6;
+                    applyScoreZoom();
+                    return;
+                }
+                if (event.touches.length !== 2 || !pinchStartDistance || !pinchStartZoom) return;
+                event.preventDefault();
+                const nextZoom = Math.min(3, Math.max(0.82, pinchStartZoom * getTouchDistance(event.touches) / pinchStartDistance));
+                const midpoint = getTouchMidpoint(event.touches);
+                panX = panStartX + midpoint.x - pinchStartMidpoint.x;
+                panY = panStartY + midpoint.y - pinchStartMidpoint.y;
+                if (Math.abs(nextZoom - scoreZoom) < 0.01 && panX === panStartX && panY === panStartY) return;
+                scoreZoom = nextZoom;
+                applyScoreZoom();
+            };
+            wrapper.ontouchend = (event) => {
+                if (currentTool === 'hand' && event.touches.length === 0 && touchGestureActive && !pinchStartDistance && !handMoved) {
+                    touchGestureActive = false;
+                }
+                if (event.touches.length === 0 && pageSwipeStartX !== null && pageSwipeStartY !== null && !pinchStartDistance) {
+                    const touch = event.changedTouches[0];
+                    const deltaX = touch.clientX - pageSwipeStartX;
+                    const deltaY = touch.clientY - pageSwipeStartY;
+                    pageSwipeStartX = null;
+                    pageSwipeStartY = null;
+                    if (Math.abs(deltaX) > 70 && Math.abs(deltaX) > Math.abs(deltaY) * 1.35) {
+                        changePage(deltaX < 0 ? 1 : -1);
+                        return;
+                    }
+                }
+                if (pinchStartDistance) {
+                    if (event.touches.length > 0) return;
+                    pinchStartDistance = null;
+                    pinchStartZoom = null;
+                    pinchStartMidpoint = null;
+                    touchGestureActive = false;
+                    panStartX = panX;
+                    panStartY = panY;
+                    springScoreToFit();
+                    return;
+                }
+
+                if (!touchGestureActive && !touchWasDrawing && eventChangedTouchesAreScoreTap(event)) {
+                    const touch = event.changedTouches[0];
+                    const now = Date.now();
+                    const isDoubleTap = now - lastScoreTapAt < 300 &&
+                        Math.hypot(touch.clientX - lastScoreTapX, touch.clientY - lastScoreTapY) < 30;
+                    if (isDoubleTap) {
+                        lastScoreTapAt = 0;
+                        clearTimeout(scoreTapTimer);
+                        toggleScoreZoom(touch.clientX, touch.clientY);
+                    } else {
+                        lastScoreTapAt = now;
+                        lastScoreTapX = touch.clientX;
+                        lastScoreTapY = touch.clientY;
+                        clearTimeout(scoreTapTimer);
+                        scoreTapTimer = setTimeout(toggleViewerChrome, 300);
+                    }
+                } else if (currentTool === 'hand' && event.touches.length === 0 && !handMoved && eventChangedTouchesAreScoreTap(event)) {
+                    toggleViewerChrome();
+                }
+            };
+        }
+
+        function eventChangedTouchesAreScoreTap(event) {
+            return event.changedTouches?.length === 1 && scoreStage && scoreStage.contains(event.target);
+        }
+
+        function applyWatermarks(ctx, width, height, options = {}) {
+            const userEmail = currentProfile?.email || currentUser?.email || 'musician';
+            const timestamp = new Date().toISOString();
+
+            ctx.save();
+            const watermarkText = `Licensed exclusively to: ${userEmail} • Φιλαρμονική Ορχήστρα Θήβας • ${getCurrentSeason()}`;
+            const maxWidth = Math.max(80, width - 20);
+            const baseFontSize = Math.min(10, Math.max(6, width / 55));
+            ctx.font = `${baseFontSize}px monospace`;
+            const measuredWidth = ctx.measureText(watermarkText).width;
+            if (measuredWidth > maxWidth) {
+                ctx.font = `${Math.max(6, baseFontSize * maxWidth / measuredWidth)}px monospace`;
+            }
+            ctx.fillStyle = 'rgba(148, 163, 184, 0.6)';
+            ctx.textAlign = 'center';
+            if (options.baselineBottom) {
+                ctx.textBaseline = 'bottom';
+                ctx.fillText(watermarkText, width / 2, height - 3);
+            } else {
+                ctx.fillText(watermarkText, width / 2, height - Math.max(8, baseFontSize + 3));
+            }
+            ctx.restore();
+
+            const fingerprintString = textToZeroWidth(`UID:${userEmail}|TS:${timestamp}`);
+            ctx.save();
+            ctx.font = '1px sans-serif';
+            ctx.fillStyle = 'rgba(0,0,0,0)';
+            ctx.fillText(fingerprintString, 5, 10);
+            ctx.restore();
+        }
+
+        function getCurrentSeason(date = new Date()) {
+            const year = date.getFullYear();
+            const seasonStartYear = date.getMonth() >= 9 ? year : year - 1;
+            return `${seasonStartYear}-${String((seasonStartYear + 1) % 100).padStart(2, '0')}`;
+        }
+
+        function textToZeroWidth(text) {
+            const zeroWidthSpace = '\u200B';
+            const zeroWidthNonJoiner = '\u200C';
+            const zeroWidthJoiner = '\u200D';
+            
+            return text.split('').map(char => {
+                const bin = char.charCodeAt(0).toString(2).padStart(8, '0');
+                return bin.split('').map(bit => bit === '1' ? zeroWidthSpace : zeroWidthNonJoiner).join('');
+            }).join(zeroWidthJoiner);
+        }
+
+        function formatEventLocation(location) {
+            if (!location) return '';
+            if (location.includes('|')) {
+                const parts = location.split('|');
+                const locName = parts.shift().trim();
+                const locUrl = parts.join('|').trim();
+                const safeUrl = safeExternalUrl(locUrl);
+                return safeUrl
+                    ? `<a href="${safeUrl}" rel="noopener noreferrer" target="_blank" class="text-indigo-200 hover:underline">${escapeHtml(locName)}</a>`
+                    : escapeHtml(location);
+            }
+            if (location.startsWith('http://') || location.startsWith('https://')) {
+                const safeUrl = safeExternalUrl(location);
+                return safeUrl
+                    ? `<a href="${safeUrl}" rel="noopener noreferrer" target="_blank" class="text-indigo-200 hover:underline">Χάρτης</a>`
+                    : escapeHtml(location);
+            }
+            return escapeHtml(location);
+        }
+
+        async function changePage(val) {
+            if (!pdfDoc || pageRendering) return;
+            if (pageNum + val < 1 || pageNum + val > pdfDoc.numPages) return;
+            
+            savePageToMemory(); 
+            pageNum += val;
+            annotationHistory = [];
+            annotationRedoHistory = [];
+            await renderPage(pageNum);
+            await restorePageFromMemory();
+            playPageTurnHint(val);
+        }
+
+        const pageAnnotations = {};
+
+        function savePageToMemory() {
+            if (!drawCanvas || !highlightCanvas) return;
+            pageAnnotations[pageNum] = {
+                drawing: drawCanvas.toDataURL(),
+                highlighting: highlightCanvas.toDataURL()
+            };
+        }
+
+        async function restorePageFromMemory() {
+            if (!drawCanvas || !highlightCanvas) return;
+            clearDrawingCanvas();
+            const saved = pageAnnotations[pageNum];
+            if (!saved) return;
+            const drawing = typeof saved === 'string' ? saved : saved.drawing;
+            const highlighting = typeof saved === 'string' ? null : saved.highlighting;
+            await Promise.all([
+                restoreCanvasImage(drawing, drawCtx, drawCanvas),
+                restoreCanvasImage(highlighting, highlightCtx, highlightCanvas)
+            ]);
+        }
+
+        function restoreCanvasImage(source, context, canvas) {
+            return new Promise(resolve => {
+                if (!source || !context || !canvas) {
+                    resolve();
+                    return;
+                }
+                const img = new Image();
+                img.onload = () => {
+                    context.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    resolve();
+                };
+                img.onerror = () => resolve();
+                img.src = source;
+            });
+        }
+
+        function setupDrawingEvents() {
+            drawCanvas.onmousedown = startDraw;
+            drawCanvas.onmousemove = draw;
+            drawCanvas.onmouseup = stopDraw;
+            drawCanvas.onmouseleave = stopDraw;
+
+            drawCanvas.ontouchstart = (e) => {
+                e.preventDefault();
+                if (e.touches.length !== 1) {
+                    isDrawing = false;
+                    touchGestureActive = true;
+                    return;
+                }
+                touchGestureActive = false;
+                touchWasDrawing = true;
+                startDraw(e.touches[0]);
+            };
+            drawCanvas.ontouchmove = (e) => {
+                e.preventDefault();
+                if (e.touches.length !== 1) {
+                    isDrawing = false;
+                    touchGestureActive = true;
+                    return;
+                }
+                if (e.touches[0]) draw(e.touches[0]);
+            };
+            drawCanvas.ontouchend = (e) => {
+                e.preventDefault();
+                if (isDrawing) stopDraw();
+                if (e.touches.length === 0) touchGestureActive = false;
+                setTimeout(() => { touchWasDrawing = false; }, 0);
+            };
+        }
+
+        function getCanvasScaleRatio() {
+            if (!drawCanvas) return { scaleX: 1, scaleY: 1 };
+            const rect = drawCanvas.getBoundingClientRect();
+            return {
+                scaleX: drawCanvas.width / rect.width,
+                scaleY: drawCanvas.height / rect.height
+            };
+        }
+
+        function getCanvasCoords(e) {
+            if (!drawCanvas) return { x: 0, y: 0 };
+            const rect = drawCanvas.getBoundingClientRect();
+            const { scaleX, scaleY } = getCanvasScaleRatio();
+            return {
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top) * scaleY
+            };
+        }
+
+        function getToolLineWidth() {
+            const { scaleX, scaleY } = getCanvasScaleRatio();
+            const avgScale = (scaleX + scaleY) / 2 || 1;
+            if (currentTool === 'pen') {
+                return annotationSettings.pen.width * avgScale;
+            }
+            if (currentTool === 'highlighter') {
+                return annotationSettings.highlighter.width * avgScale;
+            }
+            return annotationSettings.eraser.width * avgScale;
+        }
+
+        function applyToolStyle() {
+            const width = getToolLineWidth();
+            if (currentTool === 'pen') {
+                drawCtx.strokeStyle = annotationSettings.pen.color;
+                drawCtx.fillStyle = annotationSettings.pen.color;
+                drawCtx.lineWidth = width;
+                drawCtx.lineCap = 'round';
+                drawCtx.lineJoin = 'round';
+                drawCtx.globalCompositeOperation = 'source-over';
+                drawCtx.globalAlpha = 1;
+            } else if (currentTool === 'highlighter') {
+                highlightCtx.strokeStyle = annotationSettings.highlighter.color;
+                highlightCtx.fillStyle = annotationSettings.highlighter.color;
+                highlightCtx.lineWidth = width;
+                highlightCtx.lineCap = 'square';
+                highlightCtx.lineJoin = 'miter';
+                highlightCtx.globalCompositeOperation = 'source-over';
+                highlightCtx.globalAlpha = 1;
+            } else {
+                drawCtx.fillStyle = '#000';
+                drawCtx.strokeStyle = '#000';
+                drawCtx.lineWidth = width;
+                drawCtx.lineCap = 'round';
+                drawCtx.lineJoin = 'round';
+                drawCtx.globalCompositeOperation = 'destination-out';
+                drawCtx.globalAlpha = 1;
+                highlightCtx.fillStyle = '#000';
+                highlightCtx.strokeStyle = '#000';
+                highlightCtx.lineWidth = width;
+                highlightCtx.lineCap = 'round';
+                highlightCtx.lineJoin = 'round';
+                highlightCtx.globalCompositeOperation = 'destination-out';
+                highlightCtx.globalAlpha = 1;
+            }
+        }
+
+        function stampBrush(x, y) {
+            const radius = getToolLineWidth() / 2;
+            const stamp = (ctx) => {
+                ctx.beginPath();
+                ctx.arc(x, y, radius, 0, Math.PI * 2);
+                ctx.fill();
+            };
+            if (currentTool === 'highlighter') stamp(highlightCtx);
+            else stamp(drawCtx);
+            if (currentTool === 'eraser') stamp(highlightCtx);
+        }
+
+        function strokeSegment(x, y) {
+            const segment = (ctx) => {
+                ctx.beginPath();
+                ctx.moveTo(lastDrawX, lastDrawY);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+            };
+            if (currentTool === 'highlighter') segment(highlightCtx);
+            else segment(drawCtx);
+            if (currentTool === 'eraser') segment(highlightCtx);
+        }
+
+        function startDraw(e) {
+            annotationHistory.push(getAnnotationSnapshot());
+            if (annotationHistory.length > 30) annotationHistory.shift();
+            annotationRedoHistory = [];
+            annotationsDirty = true;
+            isDrawing = true;
+            applyToolStyle();
+            const { x, y } = getCanvasCoords(e);
+            lastDrawX = x;
+            lastDrawY = y;
+            stampBrush(x, y);
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            applyToolStyle();
+            const { x, y } = getCanvasCoords(e);
+            strokeSegment(x, y);
+            lastDrawX = x;
+            lastDrawY = y;
+        }
+
+        function stopDraw() {
+            isDrawing = false;
+            drawCtx.globalAlpha = 1;
+            drawCtx.globalCompositeOperation = 'source-over';
+            highlightCtx.globalAlpha = 1;
+            highlightCtx.globalCompositeOperation = 'source-over';
+        }
+
+        function setTool(tool) {
+            currentTool = tool;
+            ['hand', 'pen', 'highlighter', 'eraser'].forEach(name => {
+                const button = document.getElementById(`tool-${name}`);
+                button.classList.toggle('bg-indigo-600', name === tool);
+                button.classList.toggle('text-white', name === tool);
+                button.classList.toggle('bg-slate-800', name !== tool);
+                button.classList.toggle('text-slate-300', name !== tool);
+            });
+            if (drawCanvas) drawCanvas.style.pointerEvents = tool === 'hand' ? 'none' : 'auto';
+            renderAnnotationOptions();
+        }
+
+        function renderAnnotationOptions() {
+            const options = document.getElementById('annotation-options');
+            if (!options || currentTool === 'hand') {
+                options?.classList.remove('open');
+                return;
+            }
+            const setting = annotationSettings[currentTool];
+            const colors = currentTool === 'pen'
+                ? [['#111827', 'Μαύρο'], ['#ef4444', 'Κόκκινο'], ['#2563eb', 'Μπλε']]
+                : currentTool === 'highlighter'
+                    ? [['#facc15', 'Κίτρινο'], ['#4ade80', 'Πράσινο'], ['#f472b6', 'Ροζ']]
+                    : [];
+            const widths = currentTool === 'pen'
+                ? [[2.5, 'Λεπτή'], [3.5, 'Μεσαία'], [5.5, 'Παχιά']]
+                : currentTool === 'highlighter'
+                    ? [[12, 'Λεπτή'], [18, 'Μεσαία'], [28, 'Παχιά']]
+                    : [[12, 'Μικρή'], [20, 'Μεσαία'], [32, 'Μεγάλη']];
+            options.innerHTML = `
+                ${colors.map(([color, label]) => `<button aria-label="${label}" title="${label}" class="${setting.color === color ? 'selected' : ''}" style="background:${color}" onclick="setAnnotationColor('${color}')"></button>`).join('')}
+                ${widths.map(([width, label]) => `<button aria-label="${label}" title="${label}" class="width-option ${setting.width === width ? 'selected' : ''}" onclick="setAnnotationWidth(${width})">${widthPreviewMarkup(width)}</button>`).join('')}
+            `;
+            options.classList.add('open');
+        }
+
+        function setAnnotationColor(color) {
+            annotationSettings[currentTool].color = color;
+            document.getElementById('annotation-options').classList.remove('open');
+        }
+
+        function setAnnotationWidth(width) {
+            annotationSettings[currentTool].width = width;
+            document.getElementById('annotation-options').classList.remove('open');
+        }
+
+        function widthPreviewMarkup(width) {
+            const stroke = currentTool === 'pen'
+                ? Math.max(2.2, Math.min(8, width * 1.2))
+                : Math.max(5, Math.min(14, width * 0.45));
+            if (currentTool === 'eraser') {
+                const radius = Math.max(3.5, Math.min(10.5, width * 0.32));
+                return `<svg viewBox="0 0 34 22" aria-hidden="true"><circle cx="17" cy="11" r="${radius}" fill="#cbd5e1"></circle></svg>`;
+            }
+            if (currentTool === 'highlighter') {
+                return `<svg viewBox="0 0 34 22" aria-hidden="true"><path d="M4 15 C11 5, 23 17, 30 8" fill="none" stroke="#cbd5e1" stroke-width="${stroke}" stroke-linecap="square" stroke-linejoin="miter"></path></svg>`;
+            }
+            return `<svg viewBox="0 0 34 22" aria-hidden="true"><path d="M4 15 C11 5, 23 17, 30 8" fill="none" stroke="#cbd5e1" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
+        }
+
+        function clearCanvas() {
+            annotationHistory.push(getAnnotationSnapshot());
+            annotationRedoHistory = [];
+            clearDrawingCanvas();
+            delete pageAnnotations[pageNum];
+            persistAnnotations({ skipCurrentPage: true });
+        }
+
+        function clearDrawingCanvas() {
+            drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+            highlightCtx.clearRect(0, 0, highlightCanvas.width, highlightCanvas.height);
+        }
+
+        function restoreAnnotationSnapshot(snapshot) {
+            clearDrawingCanvas();
+            if (!snapshot) return;
+            if (snapshot.drawing) drawCtx.drawImage(snapshot.drawing, 0, 0);
+            if (snapshot.highlighting) highlightCtx.drawImage(snapshot.highlighting, 0, 0);
+        }
+
+        function getAnnotationSnapshot() {
+            return {
+                drawing: cloneAnnotationCanvas(drawCanvas),
+                highlighting: cloneAnnotationCanvas(highlightCanvas)
+            };
+        }
+
+        function cloneAnnotationCanvas(source) {
+            if (!source) return null;
+            const copy = document.createElement('canvas');
+            copy.width = source.width;
+            copy.height = source.height;
+            copy.getContext('2d').drawImage(source, 0, 0);
+            return copy;
+        }
+
+        function undoAnnotation() {
+            if (!drawCanvas || annotationHistory.length === 0) return;
+            annotationRedoHistory.push(getAnnotationSnapshot());
+            restoreAnnotationSnapshot(annotationHistory.pop());
+            annotationsDirty = true;
+        }
+
+        function redoAnnotation() {
+            if (!drawCanvas || annotationRedoHistory.length === 0) return;
+            annotationHistory.push(getAnnotationSnapshot());
+            restoreAnnotationSnapshot(annotationRedoHistory.pop());
+            annotationsDirty = true;
+        }
+
+        function persistAnnotations(options = {}) {
+            if (!options.skipCurrentPage) savePageToMemory();
+            const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
+            const storageKey = `annotations_${userEmail}_piece_${activePieceId}`;
+            const remaining = Object.fromEntries(
+                Object.entries(pageAnnotations).filter(([, value]) => value && (value.drawing || value.highlighting || typeof value === 'string'))
+            );
+            if (Object.keys(remaining).length === 0) localStorage.removeItem(storageKey);
+            else localStorage.setItem(storageKey, JSON.stringify(remaining));
+            annotationsDirty = false;
+        }
+
+        function saveAnnotations() {
+            persistAnnotations();
+            showViewerNotice('Οι σημειώσεις αποθηκεύτηκαν.');
+        }
+
+        function showViewerNotice(message) {
+            const viewer = document.getElementById('pdf-viewer-container');
+            if (!viewer) return;
+            viewer.querySelector('#viewer-notice')?.remove();
+            viewer.querySelector('.viewer-save-mark')?.remove();
+            const notice = document.createElement('div');
+            notice.id = 'viewer-notice';
+            notice.className = 'absolute left-1/2 z-[60] -translate-x-1/2 rounded-full bg-slate-800/95 px-4 py-2 text-[11px] leading-none text-slate-100 shadow-lg';
+            notice.style.bottom = 'calc(max(12px, env(safe-area-inset-bottom)) + 64px)';
+            notice.textContent = message;
+            const mark = document.createElement('div');
+            mark.className = 'viewer-save-mark';
+            mark.innerHTML = `<div class="viewer-save-mark-box"><svg aria-hidden="true" class="h-9 w-9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 9.5 17 19 7"></path></svg></div>`;
+            viewer.appendChild(notice);
+            viewer.appendChild(mark);
+            setTimeout(() => {
+                notice.remove();
+                mark.remove();
+            }, 1400);
+        }
+
+        async function loadSavedAnnotations() {
+            const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
+            const storageKey = `annotations_${userEmail}_piece_${activePieceId}`;
+            const saved = localStorage.getItem(storageKey);
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    Object.keys(parsed).forEach(p => { pageAnnotations[p] = parsed[p]; });
+                    await restorePageFromMemory();
+                    annotationsDirty = false;
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+        }
+
+        // --- EVENTS TAB ---
+        async function renderEventsTab(options = {}) {
+            const content = document.getElementById('content');
+            if (!options.quiet) {
+                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Πρόγραμμα</h2><p class="text-slate-400 text-sm">Φόρτωση προγράμματος...</p>`;
+            }
+
+            const { data: events, error: eventError } = await supabaseClient.from('band_events').select('*').order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true });
+            
+            if (eventError) {
+                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Πρόγραμμα</h2><p class="text-red-400 text-sm">Σφάλμα φόρτωσης εκδηλώσεων: ${escapeHtml(eventError.message)}</p>`;
+                return;
+            }
+            sortEventsChronologically(events);
+
+            const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
+            const { data: responses, error: responsesError } = await supabaseClient.from('event_responses').select('*').eq('user_email', userEmail);
+            if (responsesError) {
+                console.error('Αδυναμία φόρτωσης απαντήσεων εκδηλώσεων:', responsesError);
+            }
+            eventsTabCache = { events: events || [], responses: responses || [] };
+
+            let html = `
+                <div class="flex justify-between items-center mb-4">
+                    <div class="flex items-center space-x-2">
+                        <h2 class="text-2xl font-bold">Πρόγραμμα</h2>
+                    </div>
+                    <div class="bg-slate-800 p-1 rounded-lg border border-slate-700 flex space-x-1">
+                        <button onclick="setEventsView('list')" class="px-3 py-1 rounded text-xs font-medium transition ${eventsViewMode === 'list' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}">Λίστα</button>
+                        <button onclick="setEventsView('calendar')" class="px-3 py-1 rounded text-xs font-medium transition ${eventsViewMode === 'calendar' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}">Ημερολόγιο</button>
+                    </div>
+                </div>
+            `;
+
+            if (eventsViewMode === 'calendar') {
+                html += renderCalendarGrid(events);
+            }
+
+            let displayedEvents = events || [];
+            if (eventsViewMode === 'calendar' && selectedCalendarDate) {
+                displayedEvents = displayedEvents.filter(ev => ev.date === selectedCalendarDate);
+                html += `
+                    <div class="flex justify-between items-center bg-slate-800/60 p-2.5 rounded-lg border border-slate-700 mb-3 text-xs">
+                        <span class="text-indigo-300">📅 Προβολή ημέρας: <b>${formatGreekDateOnly(selectedCalendarDate)}</b></span>
+                        <button onclick="selectedCalendarDate = null; renderEventsTab();" class="text-slate-400 hover:text-white underline">Εμφάνιση όλων</button>
+                    </div>
+                `;
+            }
+
+            if (!displayedEvents || displayedEvents.length === 0) {
+                html += `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">Δεν υπάρχουν προγραμματισμένες εκδηλώσεις.</div>`;
+            } else {
+                const upcoming = selectedCalendarDate ? displayedEvents : displayedEvents.filter(ev => !isPastEvent(ev));
+                const past = selectedCalendarDate ? [] : displayedEvents.filter(ev => isPastEvent(ev));
+                const renderEventCards = (list) => list.map(ev => {
+                    const myResp = responses?.find(r => r.event_id === ev.id);
+                    const myStatus = myResp ? myResp.status : null;
+                    const formattedDate = formatGreekDateOnly(ev.date);
+                    const dateTimeDisplay = ev.time ? `${formattedDate}, ${escapeHtml(formatEventTime(ev.time))}` : `${formattedDate} (Ώρα αναμένεται)`;
+                    let locationHtml = escapeHtml(ev.location || 'Θα ανακοινωθεί');
+                    if (ev.location && ev.location.includes('|')) {
+                        const parts = ev.location.split('|');
+                        locationHtml = `<a href="${safeExternalUrl(parts[1].trim())}" rel="noopener noreferrer" target="_blank" class="text-indigo-400 hover:underline font-medium inline-flex items-center">${escapeHtml(parts[0].trim())}</a>`;
+                    } else if (ev.location && (ev.location.startsWith('http://') || ev.location.startsWith('https://'))) {
+                        locationHtml = `<a href="${safeExternalUrl(ev.location)}" rel="noopener noreferrer" target="_blank" class="text-indigo-400 hover:underline">Χάρτης</a>`;
+                    }
+                    const typeBadge = ev.event_type ? `<span class="shrink-0 max-w-[42%] text-right bg-slate-700 text-indigo-300 px-2 py-0.5 rounded text-[10px] font-semibold whitespace-pre-line leading-tight">${escapeHtml(ev.event_type)}</span>` : '';
+                    const rsvpLocked = eventRsvpLocked(ev);
+                    let goingBtnClass = "px-3 py-1.5 rounded text-xs font-semibold transition ";
+                    let notGoingBtnClass = "px-3 py-1.5 rounded text-xs font-semibold transition ";
+                    let statusLabel = '<span class="text-slate-400">Κατάσταση: <b class="text-slate-300">Χωρίς απάντηση</b></span>';
+                    if (myStatus === 'Going') {
+                        goingBtnClass += "bg-emerald-600 text-white ring-2 ring-white shadow-md font-bold";
+                        notGoingBtnClass += "bg-slate-800 text-slate-500 border border-slate-700 opacity-40 hover:opacity-100";
+                        statusLabel = '<span class="text-slate-400">Κατάσταση: <b class="text-emerald-400">Θα είμαι εκεί ✅</b></span>';
+                    } else if (myStatus === 'Not Going') {
+                        goingBtnClass += "bg-slate-800 text-slate-500 border border-slate-700 opacity-40 hover:opacity-100";
+                        notGoingBtnClass += "bg-red-600 text-white ring-2 ring-white shadow-md font-bold";
+                        statusLabel = `<span class="text-slate-400">Κατάσταση: <b class="text-red-400">Δεν μπορώ ❌</b> <span class="text-[10px] italic">(${myResp.excuse || 'Χωρίς αιτιολογία'})</span></span>`;
+                    } else {
+                        goingBtnClass += "bg-emerald-600 hover:bg-emerald-500 text-white";
+                        notGoingBtnClass += "bg-red-600 hover:bg-red-500 text-white";
+                    }
+                    const lockNote = rsvpLocked
+                        ? (isRehearsalEvent(ev)
+                            ? 'Η δήλωση παρουσίας έχει κλείσει.'
+                            : 'Η προθεσμία δήλωσης έληξε (3 ημέρες πριν την εκδήλωση).')
+                        : '';
+                    const rsvpButtons = rsvpLocked
+                        ? `<span class="text-[11px] text-slate-500">${lockNote}</span>`
+                        : `<div class="space-x-1.5 self-end sm:self-auto">
+                                    <button onclick="rsvp(${ev.id}, 'Going')" class="${goingBtnClass}">Θα είμαι εκεί</button>
+                                    <button onclick="rsvp(${ev.id}, 'Not Going')" class="${notGoingBtnClass}">Δεν μπορώ</button>
+                                </div>`;
+                    return `
+                        <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                            <div class="flex justify-between items-start mb-1 gap-2">
+                                <h3 class="font-bold text-base text-white">${escapeHtml(ev.event_name)}</h3>
+                                ${typeBadge}
+                            </div>
+                            <p class="text-xs text-indigo-300 mb-1">📅 ${dateTimeDisplay}</p>
+                            <p class="text-xs text-slate-400 mb-2">📍 ${locationHtml} | 👔 Ενδυμασία: ${escapeHtml(ev.dress_code || 'Καθημερινή')}</p>
+                            ${ev.notes ? `<p class="text-xs bg-slate-900 p-2.5 rounded mb-3 text-slate-300 whitespace-pre-wrap">${escapeHtml(ev.notes)}</p>` : ''}
+                            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between border-t border-slate-700 pt-3 gap-2">
+                                <div class="text-xs">${statusLabel}</div>
+                                ${rsvpButtons}
+                            </div>
+                        </div>`;
+                }).join('');
+
+                if (past.length) {
+                    html += `<details class="mb-6 bg-slate-800/40 rounded-xl border border-slate-700"${options.pastOpen ? ' open' : ''}><summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-300">Προηγούμενες εκδηλώσεις (${past.length})</summary><div class="space-y-4 p-4 pt-0">${renderEventCards(past)}</div></details>`;
+                }
+                if (upcoming.length) html += `<div class="space-y-4">${renderEventCards(upcoming)}</div>`;
+                if (!upcoming.length && !past.length) {
+                    html += `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">Δεν υπάρχουν προγραμματισμένες εκδηλώσεις.</div>`;
+                }
+            }
+
+            if (isAdminRole()) {
+                html += `
+                    <div class="mt-8 bg-slate-800 p-4 rounded-xl border border-slate-700">
+                        <h3 class="font-bold text-sm text-indigo-400 mb-3">Διαχειριστής: Νέα Εκδήλωση</h3>
+                        <input type="text" id="e-name" placeholder="Όνομα (π.χ., Λιτανεία · για πρόβα βάλτε τη λέξη πρόβα στον τίτλο)" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                        <input type="text" id="e-type" placeholder="Τύπος (π.χ., Παρέλαση, Πρόβα, Συναυλία)" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                        <div class="grid grid-cols-2 gap-2 mb-2">
+                            <div>
+                                <label class="text-[10px] text-slate-400 block mb-1">Ημερομηνία (YYYY-MM-DD)</label>
+                                <input type="date" id="e-date" class="w-full p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-slate-400 block mb-1">Ώρα (Προαιρετικό, π.χ. 18:30)</label>
+                                <input type="text" id="e-time" placeholder="π.χ. 18:30" class="w-full p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                            </div>
+                        </div>
+                        <input type="text" id="e-loc" placeholder="Τοποθεσία | URL (π.χ., Συνεδριακό | https://maps...)" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                        <input type="text" id="e-dress" placeholder="Ενδυμασία (π.χ., Στολή Παρέλασης)" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                        <textarea id="e-notes" placeholder="Επιπλέον σημειώσεις..." class="w-full mb-3 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white"></textarea>
+                        <button onclick="addEvent()" class="w-full bg-emerald-600 hover:bg-emerald-500 py-2.5 rounded font-semibold text-sm">Προγραμματισμός</button>
+                    </div>
+                `;
+            }
+
+            content.innerHTML = html;
+        }
+
+        // --- ATTENDANCE TAB (Fixed to map first_name + last_name correctly) ---
+        async function renderAttendanceTab() {
+            const content = document.getElementById('content');
+            content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Παρουσίες</h2><p class="text-slate-400 text-sm">Φόρτωση αναφοράς...</p>`;
+
+            const { data: events, error: eventError } = await supabaseClient.from('band_events').select('*').order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true });
+            
+            if (eventError) {
+                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Παρουσίες</h2><p class="text-red-400 text-sm">Σφάλμα φόρτωσης δεδομένων.</p>`;
+                return;
+            }
+            sortEventsChronologically(events);
+
+            const isAdmin = isPrivilegedRole();
+
+            let html = `
+                <div class="flex items-center justify-between mb-1">
+                    <h2 class="text-2xl font-bold">Παρουσίες</h2>
+                </div>
+            `;
+            
+            if (isAdmin) {
+                html += `<p class="text-xs text-slate-400 mb-2">Συγκεντρωτική κατάσταση παρουσιών</p>
+                <button onclick="exportAttendanceWorkbook()" class="mb-3 w-full bg-emerald-700 hover:bg-emerald-600 text-white py-2 rounded-lg text-xs font-semibold">Εξαγωγή παρουσιών (Excel)</button>`;
+
+                const vapidOK = !!urlB64ToUint8Array(VAPID_PUBLIC_KEY);
+                const edgeFnOK = !!(PUSH_EDGE_FUNCTION_URL && PUSH_EDGE_FUNCTION_URL.length > 20);
+                const statusColor = (!vapidOK || !edgeFnOK) ? 'bg-amber-900/40 border-amber-700/50 text-amber-300' : 'bg-emerald-900/40 border-emerald-700/50 text-emerald-300';
+
+                html += `
+                    <details class="mb-4 bg-slate-800 p-3 rounded-xl border border-slate-700">
+                        <summary class="cursor-pointer font-bold text-sm text-amber-300 select-none">Αποστολή ειδοποίησης (διαχειριστής)</summary>
+                        <div class="mt-3 space-y-2">
+                            <div class="${statusColor} border rounded p-2 text-[11px] space-y-0.5">
+                                <div><b>Κατάσταση συστήματος:</b></div>
+                                <div>• VAPID δημόσιο κλειδί: ${vapidOK ? 'Ορισμένο' : 'Δεν έχει οριστεί ακόμα'}</div>
+                                <div>• Edge Function: ${edgeFnOK ? 'Ρυθμισμένο' : 'Δεν έχει οριστεί URL'}</div>
+                            </div>
+                            <div id="push-sub-count" class="text-[11px] text-slate-400 bg-slate-900/60 border border-slate-700/60 rounded p-2">Φόρτωση αριθμού συνδρομητών...</div>
+                            <p class="text-[11px] text-slate-400 pt-1">Στείλτε άμεση ειδοποίηση σε όλους τους μουσικούς που έχουν ενεργοποιήσει τις ειδοποιήσεις.</p>
+                            <input id="push-title" type="text" placeholder="Τίτλος (π.χ., Νέα Πρόβα)"
+                                class="w-full p-2 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                            <textarea id="push-body" rows="2" placeholder="Μήνυμα (π.χ., Πρόβα Δευτέρα 19:00 στο Ωδείο)"
+                                class="w-full p-2 bg-slate-900 border border-slate-700 rounded text-sm text-white"></textarea>
+
+                            <button onclick="sendAdminAnnouncementDirect()"
+                                class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded text-xs font-bold disabled:opacity-40"
+                                >Αποστολή ειδοποίησης</button>
+
+                            <div id="push-preview" class="hidden bg-slate-900 p-2 rounded border border-slate-700 text-xs space-y-1"></div>
+                            <div id="push-result" class="hidden text-xs rounded p-2 space-y-1"></div>
+                        </div>
+                    </details>
+                `;
+
+                if (!events || events.length === 0) {
+                    html += `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">Δεν υπάρχουν εκδηλώσεις.</div>`;
+                } else {
+                    const { profiles, error: profilesError } = await loadProfilesWithAssignments();
+                    if (profilesError) {
+                        console.error('Αδυναμία φόρτωσης προφίλ για τις παρουσίες:', profilesError);
+                    }
+                    const profilesByEmail = new Map(
+                        (profiles || []).map(profile => [
+                            String(profile.email || '').trim().toLowerCase(),
+                            profile
+                        ])
+                    );
+                    const { data: allAttendance, error: allAttError } = await supabaseClient
+                        .from('event_responses')
+                        .select('status, excuse, user_email, event_id, actual_attendance');
+                    if (allAttError) {
+                        html += `<div class="bg-red-900/40 border border-red-700/60 text-red-200 p-3 rounded-xl text-xs mb-3">Σφάλμα φόρτωσης παρουσιών: ${escapeHtml(allAttError.message || 'Άγνωστο σφάλμα')}</div>`;
+                    }
+                    const responsesByEvent = new Map();
+                    (allAttendance || []).forEach(row => {
+                        if (!responsesByEvent.has(row.event_id)) responsesByEvent.set(row.event_id, []);
+                        responsesByEvent.get(row.event_id).push(row);
+                    });
+
+                    const musicianProfiles = (profiles || []).filter(profile => String(profile.email || '').trim());
+                    const renderAttendanceCard = (ev) => {
+                        const eventResponses = responsesByEvent.get(ev.id) || [];
+                        const goingList = eventResponses.filter(r => String(r.status).toLowerCase() === 'going');
+                        const notGoingList = eventResponses.filter(r => String(r.status).toLowerCase() === 'not going');
+                        const answeredEmails = new Set(
+                            eventResponses
+                                .filter(r => String(r.status || '').trim())
+                                .map(r => String(r.user_email || '').trim().toLowerCase())
+                        );
+                        const pendingList = musicianProfiles
+                            .filter(p => !answeredEmails.has(String(p.email || '').trim().toLowerCase()))
+                            .sort((a, b) => `${a.last_name || ''} ${a.first_name || ''}`.localeCompare(`${b.last_name || ''} ${b.first_name || ''}`, 'el', { sensitivity: 'base' }));
+                        const formattedDate = formatGreekDateOnly(ev.date);
+                        const dateTimeDisplay = ev.time ? `${formattedDate}, ${escapeHtml(formatEventTime(ev.time))}` : `${formattedDate} (Ώρα αναμένεται)`;
+                        const typeBadge = ev.event_type ? `<span class="shrink-0 max-w-[42%] text-right bg-slate-700 text-indigo-300 px-2 py-0.5 rounded text-[10px] font-semibold whitespace-pre-line leading-tight">${escapeHtml(ev.event_type)}</span>` : '';
+                        const rsvpLocked = eventRsvpLocked(ev);
+                        const eventOver = eventHasEnded(ev);
+                        const responseByEmail = new Map(
+                            eventResponses.map(r => [String(r.user_email || '').trim().toLowerCase(), r])
+                        );
+                        const rsvpLabel = (row) => {
+                            const st = String(row?.status || '').toLowerCase();
+                            if (st === 'going') return 'Θα είναι εκεί';
+                            if (st === 'not going') return 'Δεν μπορεί';
+                            return 'Χωρίς δήλωση';
+                        };
+                        const personName = (email, profile) => {
+                            const fullName = `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim();
+                            return fullName || email;
+                        };
+                        const staffRsvpBtns = (email, currentStatus) => {
+                            const encoded = encodeURIComponent(String(email || '').trim().toLowerCase());
+                            if (!rsvpLocked || eventOver) return '';
+                            return `<div class="mt-1 space-x-2">
+                                ${currentStatus !== 'Going' ? `<button type="button" onclick="staffSetRsvp(${ev.id}, '${encoded}', 'Going')" class="text-[10px] text-emerald-300 underline">Θα είναι</button>` : ''}
+                                ${currentStatus !== 'Not Going' ? `<button type="button" onclick="staffSetRsvp(${ev.id}, '${encoded}', 'Not Going')" class="text-[10px] text-red-300 underline">Δεν μπορεί</button>` : ''}
+                            </div>`;
+                        };
+                        const actualBtns = (email, actual) => {
+                            const encoded = encodeURIComponent(String(email || '').trim().toLowerCase());
+                            return `<div class="mt-1 space-x-2">
+                                ${actual !== 'present' ? `<button type="button" onclick="staffSetActual(${ev.id}, '${encoded}', 'present')" class="text-[10px] text-emerald-300 underline">Παρευρέθηκε</button>` : '<span class="text-[10px] text-emerald-400">Παρευρέθηκε</span>'}
+                                ${actual !== 'absent' ? `<button type="button" onclick="staffSetActual(${ev.id}, '${encoded}', 'absent')" class="text-[10px] text-red-300 underline">Απών</button>` : '<span class="text-[10px] text-red-400">Απών</span>'}
+                            </div>`;
+                        };
+                        const rsvpBoxes = `
+                                <div class="grid grid-cols-2 gap-2 mb-3 text-xs">
+                                    <div class="bg-slate-900 p-2.5 rounded border border-slate-700/60">
+                                        <span class="text-emerald-400 font-semibold block mb-1">✅ Δήλωσαν ότι θα πάνε (${goingList.length})</span>
+                                        ${goingList.length === 0 ? '<span class="text-slate-500 italic">Καμία δήλωση</span>' :
+                                          goingList.map(r => {
+                                            const profile = profilesByEmail.get(String(r.user_email || '').trim().toLowerCase());
+                                            const instrument = attendanceInstrumentSuffix(profile);
+                                            return `<div class="text-slate-300 mb-1">• ${escapeHtml(personName(r.user_email, profile))}${escapeHtml(instrument)}${staffRsvpBtns(r.user_email, 'Going')}</div>`;
+                                          }).join('')}
+                                    </div>
+                                    <div class="bg-slate-900 p-2.5 rounded border border-slate-700/60">
+                                        <span class="text-red-400 font-semibold block mb-1">❌ Δήλωσαν απουσία (${notGoingList.length})</span>
+                                        ${notGoingList.length === 0 ? '<span class="text-slate-500 italic">Κανένας</span>' :
+                                          notGoingList.map(r => {
+                                            const profile = profilesByEmail.get(String(r.user_email || '').trim().toLowerCase());
+                                            const instrument = attendanceInstrumentSuffix(profile);
+                                            return `<div class="text-slate-300 mb-1">• <b>${escapeHtml(personName(r.user_email, profile))}${escapeHtml(instrument)}</b><br><span class="text-[10px] text-slate-400 italic">"${escapeHtml(r.excuse || 'Χωρίς αιτιολογία')}"</span>${staffRsvpBtns(r.user_email, 'Not Going')}</div>`;
+                                          }).join('')}
+                                    </div>
+                                </div>
+                                <div class="bg-slate-900 p-2.5 rounded border border-slate-700/60 text-xs ${eventOver ? 'mb-3' : ''}">
+                                    <span class="text-slate-300 font-semibold block mb-1">Χωρίς δήλωση (${pendingList.length})</span>
+                                    ${pendingList.length === 0 ? '<span class="text-slate-500 italic">Κανείς</span>' :
+                                      pendingList.map(profile => {
+                                        const instrument = attendanceInstrumentSuffix(profile);
+                                        return `<div class="text-slate-300 mb-1">• ${escapeHtml(personName(profile.email, profile))}${escapeHtml(instrument)}${staffRsvpBtns(profile.email, null)}</div>`;
+                                      }).join('')}
+                                </div>`;
+                        const rollCall = eventOver ? `
+                                <div class="bg-slate-900 p-2.5 rounded border border-amber-800/50 text-xs">
+                                    <span class="text-amber-300 font-semibold block mb-1">Πραγματική παρουσία</span>
+                                    <p class="text-[10px] text-slate-400 mb-2">Η δήλωση μένει ως έχει. Εδώ σημειώνετε ποιος ήρθε τελικά.</p>
+                                    ${[...musicianProfiles].sort((a, b) => `${a.last_name || ''} ${a.first_name || ''}`.localeCompare(`${b.last_name || ''} ${b.first_name || ''}`, 'el', { sensitivity: 'base' })).map(profile => {
+                                        const email = String(profile.email || '').trim().toLowerCase();
+                                        const row = responseByEmail.get(email);
+                                        const instrument = attendanceInstrumentSuffix(profile);
+                                        return `<div class="border-t border-slate-800 py-1.5 first:border-0">
+                                            <div class="text-slate-200">${escapeHtml(personName(email, profile))}${escapeHtml(instrument)}</div>
+                                            <div class="text-[10px] text-slate-500">Δήλωση: ${escapeHtml(rsvpLabel(row))}</div>
+                                            ${actualBtns(email, row?.actual_attendance || null)}
+                                        </div>`;
+                                    }).join('')}
+                                </div>` : '';
+                        const lockHint = !eventOver && rsvpLocked
+                            ? (isRehearsalEvent(ev)
+                                ? '<p class="text-[11px] text-amber-300/90 mb-3">Η δήλωση των μουσικών έχει κλείσει.</p>'
+                                : '<p class="text-[11px] text-amber-300/90 mb-3">Η προθεσμία των μουσικών έληξε (3 ημέρες πριν). Μπορείτε ακόμα να καταχωρήσετε δήλωση αν σας πήραν τηλέφωνο.</p>')
+                            : '';
+                        return `
+                            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                                <div class="flex justify-between items-start mb-1">
+                                    <h3 class="font-bold text-base text-white">${escapeHtml(ev.event_name)}</h3>
+                                    ${typeBadge}
+                                </div>
+                                <p class="text-xs text-indigo-300 mb-3">📅 ${dateTimeDisplay}</p>
+                                ${lockHint}
+                                ${rsvpBoxes}
+                                ${rollCall}
+                            </div>
+                        `;
+                    };
+
+                    const upcoming = events.filter(ev => !isPastEvent(ev));
+                    const past = events.filter(ev => isPastEvent(ev));
+                    if (past.length) {
+                        html += `<details class="mb-6 bg-slate-800/40 rounded-xl border border-slate-700"><summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-300">Προηγούμενες εκδηλώσεις (${past.length})</summary><div class="space-y-4 p-4 pt-0">${past.map(renderAttendanceCard).join('')}</div></details>`;
+                    }
+                    if (upcoming.length) html += `<div class="space-y-4">${upcoming.map(renderAttendanceCard).join('')}</div>`;
+                    if (!upcoming.length && !past.length) {
+                        html += `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">Δεν υπάρχουν εκδηλώσεις.</div>`;
+                    }
+                }
+            } else {
+                html += `<p class="text-xs text-slate-400 mb-4">Το προσωπικό σας ιστορικό συμμετοχών και αιτιολογιών απουσίας.</p>`;
+
+                const userEmail = currentUser?.email || currentProfile?.email;
+                const { data: myResponses, error: myResponsesError } = await supabaseClient.from('event_responses').select('*').eq('user_email', userEmail);
+                if (myResponsesError) {
+                    console.error('Αδυναμία φόρτωσης προσωπικών απαντήσεων:', myResponsesError);
+                }
+                
+                const responseByEvent = new Map((myResponses || []).map(r => [r.event_id, r]));
+                let attendedCount = 0;
+                let absentCount = 0;
+                let pendingCount = 0;
+                (events || []).forEach(ev => {
+                    const r = responseByEvent.get(ev.id);
+                    if (eventHasEnded(ev)) {
+                        if (r?.actual_attendance === 'present') attendedCount++;
+                        else if (r?.actual_attendance === 'absent') absentCount++;
+                        else pendingCount++;
+                    } else {
+                        const st = String(r?.status || '').toLowerCase();
+                        if (st === 'going') attendedCount++;
+                        else if (st === 'not going') absentCount++;
+                        else pendingCount++;
+                    }
+                });
+
+                html += `
+                    <div class="grid grid-cols-3 gap-2 mb-4 text-center">
+                        <div class="bg-slate-800 p-3 rounded-xl border border-slate-700">
+                            <span class="text-xs text-slate-400 block mb-1">Παρουσίες</span>
+                            <span class="text-lg font-bold text-emerald-400">${attendedCount}</span>
+                        </div>
+                        <div class="bg-slate-800 p-3 rounded-xl border border-slate-700">
+                            <span class="text-xs text-slate-400 block mb-1">Απουσίες</span>
+                            <span class="text-lg font-bold text-red-400">${absentCount}</span>
+                        </div>
+                        <div class="bg-slate-800 p-3 rounded-xl border border-slate-700">
+                            <span class="text-xs text-slate-400 block mb-1">Χωρίς απάντηση</span>
+                            <span class="text-lg font-bold text-slate-300">${pendingCount}</span>
+                        </div>
+                    </div>
+
+                        <h3 class="font-bold text-sm text-indigo-300 mb-3">Ιστορικό Αιτιολογιών Απουσίας</h3>
+                `;
+
+                const myAbsencesWithExcuses = myResponses?.filter(r => String(r.status).toLowerCase() === 'not going') || [];
+
+                if (myAbsencesWithExcuses.length === 0) {
+                    html += `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">Δεν έχετε καταχωρημένες απουσίες με αιτιολογία.</div>`;
+                } else {
+                    html += `<div class="space-y-3">`;
+                    myAbsencesWithExcuses.forEach(resp => {
+                        const ev = events?.find(e => e.id === resp.event_id);
+                        const eventName = ev ? ev.event_name : 'Άγνωστη Εκδήλωση';
+                        const eventDate = ev ? formatGreekDateOnly(ev.date) : '';
+
+                        html += `
+                            <div class="bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs">
+                                <div class="flex justify-between items-start mb-1">
+                                    <span class="font-bold text-white text-sm">${escapeHtml(eventName)}</span>
+                                    <span class="text-indigo-300">${escapeHtml(eventDate)}</span>
+                                </div>
+                                <p class="text-slate-400 mt-1">Αιτιολογία: <span class="text-slate-200 italic">"${escapeHtml(resp.excuse || 'Χωρίς αιτιολογία')}"</span></p>
+                            </div>
+                        `;
+                    });
+                    html += `</div>`;
+                }
+            }
+
+            content.innerHTML = html;
+
+            if (isAdmin) {
+                setTimeout(loadSubscriberCount, 10);
+            }
+        }
+
+        async function loadSubscriberCount() {
+            const el = document.getElementById('push-sub-count');
+            if (!el) return;
+            try {
+                const { count, error } = await supabaseClient
+                    .from('push_subscriptions')
+                    .select('*', { count: 'exact', head: true });
+                if (error) throw error;
+                el.className = 'text-[11px] bg-indigo-900/40 border border-indigo-700/50 rounded p-2 text-indigo-200';
+                el.textContent = `${count || 0} ενεργές συνδρομές ειδοποιήσεων. Κάθε συσκευή μετράει χωριστά.`;
+            } catch (e) {
+                el.className = 'text-[11px] bg-red-900/30 border border-red-700/50 rounded p-2 text-red-300';
+                el.textContent = 'Αδυναμία φόρτωσης αριθμού συνδρομητών.';
+            }
+        }
+
+        function setEventsView(mode) {
+            eventsViewMode = mode;
+            selectedCalendarDate = null;
+            currentCalendarMonth = new Date().getMonth();
+            currentCalendarYear = new Date().getFullYear();
+            renderEventsTab();
+        }
+
+        function changeCalendarMonth(delta) {
+            let m = currentCalendarMonth + delta;
+            let y = currentCalendarYear;
+            if (m < 0) { m = 11; y--; }
+            if (m > 11) { m = 0; y++; }
+            currentCalendarMonth = m;
+            currentCalendarYear = y;
+            const root = document.getElementById('events-calendar-root');
+            if (root && eventsTabCache.events) {
+                const wrap = document.createElement('div');
+                wrap.innerHTML = renderCalendarGrid(eventsTabCache.events);
+                const next = wrap.firstElementChild;
+                if (next) root.replaceWith(next);
+                return;
+            }
+            renderEventsTab({ quiet: true });
+        }
+
+        function formatGreekDateOnly(dateStr) {
+            if (!dateStr) return '';
+            const cleanDate = dateStr.split('T')[0];
+            const [y, m, d] = cleanDate.split('-');
+            if (!y || !m || !d) return dateStr;
+            
+            const dateObj = new Date(Number(y), Number(m) - 1, Number(d));
+            const weekday = dateObj.toLocaleDateString('el-GR', { weekday: 'long' });
+            const capitalizedWeekday = weekday.charAt(0).toUpperCase() + weekday.slice(1);
+            
+            return `${d}/${m}/${y} ${capitalizedWeekday}`;
+        }
+
+        function sortEventsChronologically(events) {
+            if (!Array.isArray(events)) return;
+            events.sort((a, b) => {
+                const dateA = a.date ? String(a.date).split('T')[0] : '9999-12-31';
+                const dateB = b.date ? String(b.date).split('T')[0] : '9999-12-31';
+                const dateCompare = dateA.localeCompare(dateB);
+                if (dateCompare !== 0) return dateCompare;
+                const timeA = a.time ? String(a.time) : '99:99';
+                const timeB = b.time ? String(b.time) : '99:99';
+                const timeCompare = timeA.localeCompare(timeB);
+                if (timeCompare !== 0) return timeCompare;
+                return Number(a.id || 0) - Number(b.id || 0);
+            });
+        }
+
+        function isRehearsalEvent(ev) {
+            const folded = `${ev?.event_name || ''} ${ev?.event_type || ''}`
+                .normalize('NFD')
+                .replace(/\p{M}/gu, '')
+                .toLowerCase();
+            return folded.includes('προβα');
+        }
+
+        function athensNowParts() {
+            const fmt = new Intl.DateTimeFormat('en-GB', {
+                timeZone: 'Europe/Athens',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hourCycle: 'h23'
+            });
+            const map = Object.fromEntries(fmt.formatToParts(new Date()).map(p => [p.type, p.value]));
+            return {
+                date: `${map.year}-${map.month}-${map.day}`,
+                hm: `${map.hour}:${map.minute}`
+            };
+        }
+
+        function isPastEvent(ev) {
+            if (!ev?.date) return false;
+            const todayStr = athensNowParts().date;
+            return String(ev.date).split('T')[0] < todayStr;
+        }
+
+        function daysUntilEvent(ev) {
+            if (!ev?.date) return 0;
+            const today = athensNowParts().date;
+            const eventDate = String(ev.date).split('T')[0];
+            return Math.round((Date.parse(`${eventDate}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000);
+        }
+
+        function eventHasEnded(ev) {
+            if (!ev?.date) return true;
+            const now = athensNowParts();
+            const eventDate = String(ev.date).split('T')[0];
+            if (eventDate < now.date) return true;
+            if (eventDate > now.date) return false;
+            const eventTime = ev.time ? String(ev.time).slice(0, 5) : '23:59';
+            return eventTime <= now.hm;
+        }
+
+        function eventRsvpLocked(ev) {
+            if (!ev?.date) return true;
+            if (isRehearsalEvent(ev)) return eventHasEnded(ev);
+            return daysUntilEvent(ev) <= 3;
+        }
+
+        function renderCalendarGrid(events) {
+            const year = currentCalendarYear;
+            const month = currentCalendarMonth;
+
+            const firstDayIndex = new Date(year, month, 1).getDay();
+            const startingDay = (firstDayIndex === 0) ? 6 : firstDayIndex - 1;
+            const totalDays = new Date(year, month + 1, 0).getDate();
+
+            const monthNames = ["Ιανουάριος", "Φεβρουάριος", "Μάρτιος", "Απρίλιος", "Μάιος", "Ιούνιος", "Ιούλιος", "Αύγουστος", "Σεπτέμβριος", "Οκτώβριος", "Νοέμβριος", "Δεκέμβριος"];
+            
+            const officialDates = new Set();
+            const rehearsalDates = new Set();
+            (events || []).forEach(ev => {
+                if (!ev.date) return;
+                const dateStr = String(ev.date).split('T')[0];
+                if (isRehearsalEvent(ev)) rehearsalDates.add(dateStr);
+                else officialDates.add(dateStr);
+            });
+
+            const today = new Date();
+            const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+
+            let html = `
+                <div id="events-calendar-root" class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4">
+                    <div class="flex justify-between items-center mb-3">
+                        <button onclick="changeCalendarMonth(-1)" class="bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded text-white text-xs font-semibold">◀ Προηγ.</button>
+                        <div class="text-center font-bold text-sm text-indigo-300">${monthNames[month]} ${year}</div>
+                        <button onclick="changeCalendarMonth(1)" class="bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded text-white text-xs font-semibold">Επόμ. ▶</button>
+                    </div>
+                    <div class="grid grid-cols-7 gap-1 text-center text-xs text-slate-400 mb-2">
+                        <div>Δευ</div><div>Τρι</div><div>Τετ</div><div>Πεμ</div><div>Παρ</div><div>Σαβ</div><div>Κυρ</div>
+                    </div>
+                    <div class="grid grid-cols-7 gap-1 text-center text-xs">
+            `;
+
+            for (let i = 0; i < startingDay; i++) {
+                html += `<div></div>`;
+            }
+
+            for (let day = 1; day <= totalDays; day++) {
+                const dayStr = String(day).padStart(2, '0');
+                const monthStr = String(month + 1).padStart(2, '0');
+                const fullDateStr = `${year}-${monthStr}-${dayStr}`;
+                const hasOfficial = officialDates.has(fullDateStr);
+                const hasRehearsal = rehearsalDates.has(fullDateStr);
+                const isToday = fullDateStr === todayStr;
+
+                let btnClass = "py-2 rounded transition font-medium text-[11px] ";
+                if (hasOfficial) {
+                    btnClass += "bg-indigo-600 text-white font-bold hover:bg-indigo-500 cursor-pointer";
+                } else if (hasRehearsal) {
+                    btnClass += "bg-slate-700/80 text-slate-200 border border-slate-500 hover:bg-slate-700 cursor-pointer";
+                } else if (isToday) {
+                    btnClass += "bg-slate-700 text-amber-300 border border-amber-400/50";
+                } else {
+                    btnClass += "text-slate-300 hover:bg-slate-700/50";
+                }
+
+                if (selectedCalendarDate === fullDateStr) {
+                    btnClass = "py-2 rounded bg-emerald-600 text-white font-bold ring-2 ring-white cursor-pointer text-[11px]";
+                }
+
+                html += `<button onclick="filterByDate('${fullDateStr}')" class="${btnClass}">${day}</button>`;
+            }
+
+            html += `
+                    </div>
+                    <div class="flex justify-center gap-4 mt-3 text-[10px] text-slate-400">
+                        <span class="inline-flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-full bg-indigo-600"></span> Εκδήλωση</span>
+                        <span class="inline-flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-full bg-slate-700 border border-slate-500"></span> Πρόβα</span>
+                    </div>
+                </div>
+            `;
+            return html;
+        }
+
+        function filterByDate(dateStr) {
+            selectedCalendarDate = dateStr;
+            renderEventsTab();
+        }
+
+        async function rsvp(eventId, status) {
+            let ev = (eventsTabCache.events || []).find(e => Number(e.id) === Number(eventId));
+            if (!ev) {
+                const { data } = await supabaseClient.from('band_events').select('id, date, time, event_name, event_type').eq('id', eventId).maybeSingle();
+                ev = data;
+            }
+            if (eventRsvpLocked(ev)) {
+                showAppNotice(
+                    isRehearsalEvent(ev)
+                        ? 'Η δήλωση παρουσίας για αυτή την πρόβα έχει κλείσει.'
+                        : 'Η προθεσμία δήλωσης έληξε 3 ημέρες πριν την εκδήλωση.'
+                );
+                return;
+            }
+
+            let excuse = null;
+
+            if (status === 'Not Going') {
+                excuse = prompt('Παρακαλώ εισάγετε την αιτιολογία για την απουσία σας:');
+                if (excuse === null) return; 
+                if (excuse.trim() === '') {
+                    showAppNotice('Η αιτιολογία είναι υποχρεωτική όταν δηλώνετε ότι δεν μπορείτε να παρευρεθείτε.');
+                    return;
+                }
+            } else {
+                excuse = ''; 
+            }
+
+            const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
+            if (!userEmail) {
+                showAppNotice('Σφάλμα: Δεν βρέθηκε ενεργό email χρήστη.');
+                return;
+            }
+
+            const normalizedEmail = userEmail.trim().toLowerCase();
+            const { error } = await supabaseClient
+                .from('event_responses')
+                .upsert(
+                    [{ event_id: eventId, user_email: normalizedEmail, status, excuse }],
+                    { onConflict: 'event_id,user_email' }
+                );
+
+            if (error) {
+                showAppNotice(`Σφάλμα αποθήκευσης παρουσίας:\n${error.message}\n\nΚωδικός: ${error.code || '—'}`);
+            } else {
+                const scroller = document.getElementById('content') || document.scrollingElement || document.documentElement;
+                const scrollY = scroller.scrollTop || 0;
+                const pastOpen = !!document.querySelector('#content details')?.open;
+                await renderEventsTab({ quiet: true, pastOpen });
+                const restore = () => {
+                    scroller.scrollTop = scrollY;
+                };
+                requestAnimationFrame(() => {
+                    restore();
+                    requestAnimationFrame(restore);
+                });
+                setTimeout(restore, 50);
+            }
+        }
+
+        async function staffSetRsvp(eventId, encodedEmail, status) {
+            if (!isPrivilegedRole()) {
+                showAppNotice('Μόνο ο διαχειριστής και ο μαέστρος μπορούν να καταχωρήσουν δήλωση.');
+                return;
+            }
+            const userEmail = decodeURIComponent(encodedEmail || '').trim().toLowerCase();
+            if (!userEmail) return;
+            let excuse = '';
+            if (status === 'Not Going') {
+                excuse = prompt('Αιτιολογία απουσίας:', 'Δήλωση μέσω μαέστρου/διαχειριστή');
+                if (excuse === null) return;
+                if (!excuse.trim()) {
+                    showAppNotice('Η αιτιολογία είναι υποχρεωτική για απουσία.');
+                    return;
+                }
+            }
+            const { data: existing } = await supabaseClient
+                .from('event_responses')
+                .select('actual_attendance, actual_note, actual_set_at')
+                .eq('event_id', eventId)
+                .eq('user_email', userEmail)
+                .maybeSingle();
+            const { error } = await supabaseClient
+                .from('event_responses')
+                .upsert(
+                    [{
+                        event_id: eventId,
+                        user_email: userEmail,
+                        status,
+                        excuse,
+                        actual_attendance: existing?.actual_attendance ?? null,
+                        actual_note: existing?.actual_note ?? null,
+                        actual_set_at: existing?.actual_set_at ?? null
+                    }],
+                    { onConflict: 'event_id,user_email' }
+                );
+            if (error) showAppNotice(`Σφάλμα δήλωσης:\n${error.message}`);
+            else renderAttendanceTab();
+        }
+
+        async function staffSetActual(eventId, encodedEmail, actual) {
+            if (!isPrivilegedRole()) {
+                showAppNotice('Μόνο ο διαχειριστής και ο μαέστρος μπορούν να καταχωρήσουν παρουσία.');
+                return;
+            }
+            const userEmail = decodeURIComponent(encodedEmail || '').trim().toLowerCase();
+            if (!userEmail) return;
+            const { data: existing } = await supabaseClient
+                .from('event_responses')
+                .select('status, excuse')
+                .eq('event_id', eventId)
+                .eq('user_email', userEmail)
+                .maybeSingle();
+            const { error } = await supabaseClient
+                .from('event_responses')
+                .upsert(
+                    [{
+                        event_id: eventId,
+                        user_email: userEmail,
+                        status: existing?.status || '',
+                        excuse: existing?.excuse || '',
+                        actual_attendance: actual,
+                        actual_set_at: new Date().toISOString()
+                    }],
+                    { onConflict: 'event_id,user_email' }
+                );
+            if (error) showAppNotice(`Σφάλμα παρουσίας:\n${error.message}`);
+            else renderAttendanceTab();
+        }
+
+        async function addEvent() {
+            if (!isAdminRole()) {
+                showAppNotice('Μόνο οι διαχειριστές μπορούν να δημιουργούν εκδηλώσεις.');
+                return;
+            }
+            const event_name = document.getElementById('e-name').value;
+            const event_type = document.getElementById('e-type').value;
+            const date = document.getElementById('e-date').value;
+            const time = document.getElementById('e-time').value;
+            const location = document.getElementById('e-loc').value;
+            const dress_code = document.getElementById('e-dress').value;
+            const notes = document.getElementById('e-notes').value;
+
+            const { error } = await supabaseClient.from('band_events').insert([{ event_name, event_type, date, time, location, dress_code, notes }]);
+            if (error) showAppNotice(error.message);
+            else {
+                showAppNotice('Η εκδήλωση προστέθηκε!');
+                renderEventsTab();
+            }
+        }
+
+        async function togglePushNotifications() {
+            if (pushBusy) return;
+            pushBusy = true;
+            setPushSwitchBusy(true);
+            try {
+                if (pushSubscription) await disablePushNotifications();
+                else await enablePushNotifications();
+            } finally {
+                pushBusy = false;
+                setPushSwitchBusy(false);
+            }
+        }
+
+        function setPushSwitchBusy(busy) {
+            document.querySelector('.push-switch')?.classList.toggle('busy', !!busy);
+        }
+
+        function setPushSwitchState(on) {
+            const button = document.querySelector('.push-switch');
+            if (!button) return;
+            button.classList.toggle('on', !!on);
+            button.setAttribute('aria-checked', on ? 'true' : 'false');
+        }
+
+        async function subscribeToPushService(reg, appKey) {
+            const options = {
+                userVisibleOnly: true,
+                applicationServerKey: new Uint8Array(appKey)
+            };
+            const existingSub = await reg.pushManager.getSubscription();
+            if (existingSub) return existingSub;
+            try {
+                return await reg.pushManager.subscribe(options);
+            } catch (firstError) {
+                const stale = await reg.pushManager.getSubscription();
+                if (stale) await stale.unsubscribe().catch(() => {});
+                try {
+                    const ready = await navigator.serviceWorker.ready;
+                    return await ready.pushManager.subscribe(options);
+                } catch {
+                    throw firstError;
+                }
+            }
+        }
+
+        async function enablePushNotifications() {
+            const blocked = pushSubscribeBlockedReason();
+            if (blocked) {
+                showAppNotice(blocked);
+                return;
+            }
+
+            const appKey = urlB64ToUint8Array(VAPID_PUBLIC_KEY);
+            if (!appKey) {
+                showAppNotice('Το δημόσιο κλειδί VAPID δεν έχει ρυθμιστεί ακόμα.');
+                return;
+            }
+
+            setPushSwitchState(true);
+            try {
+                const reg = await readyPushRegistration();
+                if (!reg) throw new Error('Δεν ήταν δυνατή η ενεργοποίηση του Service Worker.');
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') {
+                    localStorage.setItem(PUSH_OPT_KEY, '0');
+                    setPushSwitchState(false);
+                    showAppNotice('Η άδεια ειδοποιήσεων δεν εγκρίθηκε.');
+                    return;
+                }
+
+                pushSubscription = await subscribeToPushService(reg, appKey);
+                localStorage.setItem(PUSH_OPT_KEY, '1');
+
+                const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
+                const subJSON = pushSubscription.toJSON();
+                const { error: saveErr } = await supabaseClient
+                    .from('push_subscriptions')
+                    .upsert({
+                        user_email: userEmail,
+                        user_id: currentUser?.id || null,
+                        endpoint: subJSON.endpoint,
+                        p256dh_key: subJSON.keys?.p256dh || '',
+                        auth_secret: subJSON.keys?.auth  || '',
+                        user_agent: navigator.userAgent
+                    }, { onConflict: 'endpoint' });
+
+                if (saveErr) throw saveErr;
+
+                showAppToast('Επιτυχής ενεργοποίηση ειδοποιήσεων.', 'notify');
+                renderProfileTab();
+            } catch (e) {
+                console.error(e);
+                pushSubscription = null;
+                localStorage.setItem(PUSH_OPT_KEY, '0');
+                setPushSwitchState(false);
+                if (isPushServiceError(e)) showAppStepsDialog(pushSubscribeHelpMessage());
+                else showAppNotice('Σφάλμα ενεργοποίησης ειδοποιήσεων: ' + (e.message || e));
+            }
+        }
+
+        async function disablePushNotifications() {
+            const existing = pushSubscription;
+            pushSubscription = null;
+            setPushSwitchState(false);
+            try {
+                localStorage.setItem(PUSH_OPT_KEY, '0');
+                if (existing) {
+                    const subJSON = existing.toJSON();
+                    const { error: delErr } = await supabaseClient
+                        .from('push_subscriptions')
+                        .delete()
+                        .eq('endpoint', subJSON.endpoint);
+                    if (delErr) console.warn('DB delete warning:', delErr);
+                }
+                showAppToast('Οι ειδοποιήσεις απενεργοποιήθηκαν.', 'notify-off');
+                renderProfileTab();
+            } catch (e) {
+                pushSubscription = existing;
+                setPushSwitchState(true);
+                showAppNotice('Σφάλμα απενεργοποίησης: ' + e.message);
+            }
+        }
+
+        async function sendAdminAnnouncementDirect() {
+            if (!isPrivilegedRole()) {
+                showAppNotice('Μόνο οι διαχειριστές και ο μαέστρος μπορούν να στείλουν ειδοποιήσεις.');
+                return;
+            }
+            const titleEl = document.getElementById('push-title');
+            const bodyEl  = document.getElementById('push-body');
+            const title = (titleEl.value || '').trim();
+            const body  = (bodyEl.value  || '').trim();
+
+            if (!title || !body) { showAppNotice('Παρακαλώ συμπληρώστε τίτλο και μήνυμα.'); return; }
+
+            const edgeUrl = PUSH_EDGE_FUNCTION_URL || '';
+            if (!urlB64ToUint8Array(VAPID_PUBLIC_KEY)) {
+                showAppNotice('Το VAPID public key δεν είναι έγκυρο. Πρέπει να είναι το νέο, μεγαλύτερο κλειδί από generate_vapid_keys.js.');
+                return;
+            }
+            if (edgeUrl.length < 10) {
+                showAppNotice('Δεν έχει οριστεί το URL του Edge Function!\n\nΕνεργοποιήστε το push-sender στο Supabase Dashboard -> Edge Functions και επικολλήστε το URL στη μεταβλητή PUSH_EDGE_FUNCTION_URL στο index.html.');
+                return;
+            }
+
+            const preview = document.getElementById('push-preview');
+            const result  = document.getElementById('push-result');
+            preview.classList.remove('hidden');
+            preview.className = 'hidden';
+            result.classList.remove('hidden');
+            result.className = 'text-xs rounded p-2 space-y-1 bg-slate-900 border border-slate-700';
+            result.innerHTML = `<span class="text-slate-300">📡 Σύνδεση με τον server...</span>`;
+
+            try {
+                const { data: { session } } = await supabaseClient.auth.getSession();
+                if (!session) throw new Error('Δεν υπάρχει ενεργή σύνδεση.');
+
+                const res = await fetch(edgeUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${session.access_token}`,
+                        'apikey': SUPABASE_ANON_KEY
+                    },
+                    body: JSON.stringify({ title, body, url: './index.html#notifications' })
+                });
+
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+                const ok = data.sent || 0;
+                const fail = data.failed || 0;
+                const total = data.total || (ok + fail);
+                const note = data.note || '';
+
+                result.className = 'text-xs rounded p-2 space-y-1 bg-emerald-900/40 border border-emerald-700/50';
+                result.innerHTML =
+                    `<div class="font-bold text-emerald-200">Αποστολή ολοκληρώθηκε</div>` +
+                    `<div class="text-emerald-100">Επιτυχείς: <b>${Number(ok)}</b> • Αποτυχίες: <b>${Number(fail)}</b> • Σύνολο: <b>${Number(total)}</b></div>` +
+                    (note ? `<div class="text-[11px] text-emerald-200/80 mt-1 italic">${escapeHtml(note)}</div>` : '') +
+                    ((data && data.failed_details && data.failed_details.length) ?
+                        `<div class="mt-1 text-[10px] text-emerald-100/80 max-h-16 overflow-auto">Αποτυχίες: ${escapeHtml(data.failed_details.map(x => `${x.email} (${x.reason})`).join(', '))}</div>` : '');
+            } catch (e) {
+                result.className = 'text-xs rounded p-2 space-y-1 bg-red-900/40 border border-red-700/50';
+                result.innerHTML = `<div class="font-bold text-red-200">Σφάλμα αποστολής</div><div class="text-red-100">${escapeHtml(e.message)}</div><div class="text-[10px] text-red-200/70 mt-1">Αν το σφάλμα έχει να κάνει με secrets ή VAPID, ελέγξτε τα Secrets στο Edge Function.</div>`;
+            }
+        }
+
+        function showAppToast(message, variant = 'success') {
+            const existing = document.getElementById('app-toast');
+            if (existing) existing.remove();
+            const toast = document.createElement('div');
+            toast.id = 'app-toast';
+            toast.className = 'fixed inset-0 z-[10000] bg-black/50 flex items-center justify-center p-4';
+            const off = variant === 'notify-off';
+            const border = off ? 'border-red-700/60' : 'border-emerald-700/60';
+            const icon = variant === 'notify'
+                ? `<div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400">
+                    <svg aria-hidden="true" class="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10 19a2 2 0 0 0 4 0"></path><path d="m9 12 2 2 4-4"></path></svg>
+                   </div>`
+                : off
+                ? `<div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-red-500/15 text-red-400">
+                    <svg aria-hidden="true" class="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10 19a2 2 0 0 0 4 0"></path><path d="M9.2 10.2 14.8 15.8"></path><path d="M14.8 10.2 9.2 15.8"></path></svg>
+                   </div>`
+                : `<div class="text-3xl mb-2">✅</div>`;
+            toast.innerHTML = `
+                <div class="bg-slate-800 border ${border} rounded-2xl p-5 w-full max-w-sm text-center">
+                    ${icon}
+                    <p class="text-sm text-slate-100 mb-4">${escapeHtml(message)}</p>
+                    <button class="w-full py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold" onclick="document.getElementById('app-toast')?.remove()">Κλείσιμο</button>
+                </div>`;
+            document.body.appendChild(toast);
+        }
+
+        async function loadXlsxLibrary() {
+            if (window.XLSX) return window.XLSX;
+            await new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+                script.onload = resolve;
+                script.onerror = () => reject(new Error('Αδυναμία φόρτωσης Excel βιβλιοθήκης.'));
+                document.head.appendChild(script);
+            });
+            return window.XLSX;
+        }
+
+        function autosizeSheetColumns(ws, aoa) {
+            const colCount = Math.max(0, ...aoa.map(row => row.length));
+            ws['!cols'] = Array.from({ length: colCount }, (_, i) => {
+                let max = 8;
+                aoa.forEach(row => {
+                    const len = String(row[i] ?? '').length;
+                    if (len > max) max = len;
+                });
+                return { wch: Math.min(48, max + 1) };
+            });
+        }
+
+        function musicianFullName(profile, email) {
+            const last = (profile?.last_name || '').trim();
+            const first = (profile?.first_name || '').trim();
+            if (last && first) return `${last} ${first}`;
+            return last || first || email || '';
+        }
+
+        function rsvpStatusLabel(status) {
+            const st = String(status || '').toLowerCase();
+            if (st === 'going') return 'Θα είναι εκεί';
+            if (st === 'not going') return 'Δεν μπορώ';
+            return 'Χωρίς δήλωση';
+        }
+
+        function actualAttendanceLabel(actual) {
+            if (actual === 'present') return 'Παρευρέθηκε';
+            if (actual === 'absent') return 'Απών';
+            return '';
+        }
+
+        async function exportAttendanceWorkbook() {
+            if (!isPrivilegedRole()) return;
+            let XLSX;
+            try {
+                XLSX = await loadXlsxLibrary();
+            } catch (e) {
+                showAppNotice(e.message || 'Αδυναμία εξαγωγής Excel.');
+                return;
+            }
+
+            const [{ data: events }, { profiles }, { data: responses }] = await Promise.all([
+                supabaseClient.from('band_events').select('id, event_name, event_type, date, time'),
+                loadProfilesWithAssignments(),
+                supabaseClient.from('event_responses').select('event_id, user_email, status, excuse, actual_attendance')
+            ]);
+
+            const endedEvents = (events || []).filter(ev => eventHasEnded(ev));
+            sortEventsChronologically(endedEvents);
+
+            const musicians = (profiles || []).filter(p => String(p.email || '').trim()).sort((a, b) =>
+                musicianFullName(a).localeCompare(musicianFullName(b), 'el', { sensitivity: 'base' })
+            );
+
+            const responsesByEvent = new Map();
+            (responses || []).forEach(row => {
+                if (!responsesByEvent.has(row.event_id)) responsesByEvent.set(row.event_id, []);
+                responsesByEvent.get(row.event_id).push(row);
+            });
+
+            const responseFor = (eventId, email) => {
+                const list = responsesByEvent.get(eventId) || [];
+                return list.find(r => String(r.user_email || '').trim().toLowerCase() === email);
+            };
+
+            const sheetFromRows = (aoa) => {
+                const ws = XLSX.utils.aoa_to_sheet(aoa);
+                autosizeSheetColumns(ws, aoa);
+                return ws;
+            };
+
+            const perEvent = [['Εκδήλωση', 'Ημερομηνία', 'Ώρα', 'Παρουσίες', 'Απουσίες']];
+            endedEvents.forEach(ev => {
+                let present = 0;
+                let absent = 0;
+                musicians.forEach(p => {
+                    const email = String(p.email || '').trim().toLowerCase();
+                    const actual = responseFor(ev.id, email)?.actual_attendance;
+                    if (actual === 'present') present++;
+                    else if (actual === 'absent') absent++;
+                });
+                perEvent.push([
+                    ev.event_name || '',
+                    ev.date ? String(ev.date).split('T')[0] : '',
+                    formatEventTime(ev.time),
+                    present,
+                    absent
+                ]);
+            });
+
+            const tallyFor = (list) => musicians.map(p => {
+                const email = String(p.email || '').trim().toLowerCase();
+                let present = 0;
+                let absent = 0;
+                list.forEach(ev => {
+                    const actual = responseFor(ev.id, email)?.actual_attendance;
+                    if (actual === 'present') present++;
+                    else if (actual === 'absent') absent++;
+                });
+                return [musicianFullName(p, email), present, absent];
+            });
+
+            const officialEnded = endedEvents.filter(ev => !isRehearsalEvent(ev));
+            const rehearsalEnded = endedEvents.filter(ev => isRehearsalEvent(ev));
+            const perPersonEvents = [['Μουσικός', 'Παρουσίες', 'Απουσίες'], ...tallyFor(officialEnded)];
+            const perPersonRehearsals = [['Μουσικός', 'Παρουσίες', 'Απουσίες'], ...tallyFor(rehearsalEnded)];
+            const perPersonTotal = [['Μουσικός', 'Συνολικές Παρουσίες', 'Συνολικές Απουσίες'], ...tallyFor(endedEvents)];
+
+            const detail = [['Εκδήλωση', 'Ημερομηνία', 'Ώρα', 'Μουσικός', 'Όργανο', 'Κατάσταση', 'Αιτιολογία', 'Πραγματική παρουσία']];
+            endedEvents.forEach(ev => {
+                musicians.forEach(p => {
+                    const email = String(p.email || '').trim().toLowerCase();
+                    const row = responseFor(ev.id, email);
+                    detail.push([
+                        ev.event_name || '',
+                        ev.date ? String(ev.date).split('T')[0] : '',
+                        formatEventTime(ev.time),
+                        musicianFullName(p, email),
+                        profilePrimaryInstrumentLabel(p),
+                        rsvpStatusLabel(row?.status),
+                        row?.excuse || '',
+                        actualAttendanceLabel(row?.actual_attendance)
+                    ]);
+                });
+            });
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, sheetFromRows(perEvent), 'Ανά εκδήλωση');
+            XLSX.utils.book_append_sheet(wb, sheetFromRows(perPersonEvents), 'Άτομο - Εκδηλώσεις');
+            XLSX.utils.book_append_sheet(wb, sheetFromRows(perPersonRehearsals), 'Άτομο - Πρόβες');
+            XLSX.utils.book_append_sheet(wb, sheetFromRows(perPersonTotal), 'Άτομο - Σύνολο');
+            XLSX.utils.book_append_sheet(wb, sheetFromRows(detail), 'Αναλυτικό');
+
+            const filename = `Parousies ${athensNowParts().date}.xlsx`;
+            const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+            const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const file = new File([blob], filename, { type: blob.type });
+            if (navigator.share && navigator.canShare?.({ files: [file] })) {
+                await navigator.share({ files: [file], title: 'Παρουσίες' });
+                return;
+            }
+            XLSX.writeFile(wb, filename);
+        }
+
+        async function renderProfileTab() {
+            const content = document.getElementById('content');
+            const roleDisplay = isAdminRole() ? 'Διαχειριστής' : (isConductorRole() ? 'Μαέστρος' : 'Μουσικός');
+            
+            const firstName = currentProfile?.first_name || currentProfile?.name || '';
+            const lastName = currentProfile?.last_name || '';
+            const instrument = assignmentLabels().join(', ')
+                || (isConductorRole() ? 'Μαέστρος' : '')
+                || (isAdminRole() ? 'Διαχειριστής' : '')
+                || (currentProfile?.instrument && currentProfile.instrument !== 'Μη ορισμένο' ? currentProfile.instrument : '')
+                || 'Μη ορισμένο';
+
+            const pushSupported = ('serviceWorker' in navigator) && ('PushManager' in window);
+            const pushActive = !!pushSubscription;
+
+            let pushSection = '';
+            if (pushSupported) {
+                pushSection = `
+                    <div class="${pushActive ? 'bg-emerald-900/30 border-emerald-700/50' : 'bg-slate-800/60 border-slate-700'} border rounded-xl p-4 mb-4">
+                        <div class="flex items-start justify-between gap-3 mb-1">
+                            <div>
+                                <h4 class="text-sm font-bold ${pushActive ? 'text-emerald-300' : 'text-indigo-300'}">${pushActive ? '🔔 Ειδοποιήσεις Ενεργές' : '🔔 Push Ειδοποιήσεις'}</h4>
+                                <p class="text-[11px] ${pushActive ? 'text-emerald-400/80' : 'text-slate-400'} mt-0.5">${pushActive ? 'Θα λαμβάνετε ειδοποιήσεις της εφαρμογής και ανακοινώσεις του μαέστρου.' : 'Ενεργοποιήστε για να λαμβάνετε άμεσες ειδοποιήσεις της εφαρμογής και ανακοινώσεις του μαέστρου.'}</p>
+                            </div>
+                            <button type="button" class="push-switch ${pushActive ? 'on' : ''}" role="switch" aria-checked="${pushActive ? 'true' : 'false'}" aria-label="Ειδοποιήσεις" onclick="togglePushNotifications()"></button>
+                        </div>
+                    </div>
+                `;
+            } else {
+                pushSection = `
+                    <div class="bg-slate-800/60 border border-slate-700 rounded-xl p-4 mb-4">
+                        <h4 class="text-sm font-bold text-indigo-300">🔔 Push Ειδοποιήσεις</h4>
+                        <p class="text-[11px] text-slate-400 mt-1">${pushUnsupportedMessage()}</p>
+                    </div>
+                `;
+            }
+
+            const adminAssignmentsHtml = isAdminRole() ? await buildAdminAssignmentPanel() : '';
+
+            content.innerHTML = `
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-2xl font-bold">Το Προφίλ μου</h2>
+                </div>
+                <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 space-y-3 mb-4">
+                    <div>
+                        <span class="text-xs text-slate-400 block">Όνομα</span>
+                        <p class="text-base font-semibold text-white">${escapeHtml(firstName || '—')}</p>
+                    </div>
+                    <div>
+                        <span class="text-xs text-slate-400 block">Επώνυμο</span>
+                        <p class="text-base font-semibold text-white">${escapeHtml(lastName || '—')}</p>
+                    </div>
+                    <div>
+                        <span class="text-xs text-slate-400 block">Όργανο</span>
+                        <p class="text-base font-semibold text-indigo-300">${escapeHtml(instrument)}</p>
+                    </div>
+                    <div class="pt-2 border-t border-slate-700">
+                        <span class="text-xs text-slate-400 block">Email</span>
+                        <p class="text-sm text-slate-300">${escapeHtml(currentProfile?.email || currentUser?.email || '')}</p>
+                    </div>
+                    <div>
+                        <span class="text-xs text-slate-400 block">Ρόλος Συστήματος</span>
+                        <span class="inline-block mt-1 uppercase text-xs bg-slate-900 px-2.5 py-1 rounded text-emerald-400 font-medium">${roleDisplay}</span>
+                    </div>
+                </div>
+                ${pushSection}
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4">
+                    <h3 class="text-sm font-bold text-indigo-300 mb-1">Κωδικός πρόσβασης</h3>
+                    <p class="text-[11px] text-slate-400 mb-3">Αλλάξτε τον κωδικό του λογαριασμού σας.</p>
+                    <button onclick="startChangePassword()" class="w-full bg-slate-900 hover:bg-slate-700 border border-slate-600 text-white py-2.5 rounded-lg text-xs font-semibold transition">Αλλαγή κωδικού</button>
+                </div>
+                ${adminAssignmentsHtml}
+                <button onclick="handleLogout()" class="w-full bg-red-600/80 hover:bg-red-600 text-white font-semibold p-3 rounded-lg transition text-sm">Αποσύνδεση</button>
+            `;
+            if (isAdminRole()) bindAdminAssignmentPanel();
+        }
+
+        async function buildAdminAssignmentPanel() {
+            const [{ data: people, error: peopleError }, { data: instruments, error: insError }, { data: rows, error: rowsError }] = await Promise.all([
+                supabaseClient.from('profiles').select('id, email, first_name, last_name, role').order('last_name'),
+                supabaseClient.from('instruments').select('id, name, max_regular_parts, sort_order, is_section').order('sort_order'),
+                supabaseClient.from('user_instruments').select('id, user_id, instrument_id, part_position, concert_set, instruments(name)')
+            ]);
+            if (peopleError || insError || rowsError) {
+                return `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4 text-red-400 text-xs">Σφάλμα φόρτωσης αναθέσεων: ${escapeHtml((peopleError || insError || rowsError).message)}</div>`;
+            }
+            window.adminAssignmentPeople = people || [];
+            window.adminAssignmentInstruments = (instruments || []).filter(ins => ins.name !== 'Full Score');
+            assignmentDirectory = rows || [];
+            const byUser = {};
+            (rows || []).forEach(row => {
+                if (!byUser[row.user_id]) byUser[row.user_id] = [];
+                byUser[row.user_id].push(row);
+            });
+            const personOptions = (people || []).map(p => {
+                const name = `${p.last_name || ''} ${p.first_name || ''}`.trim() || p.email;
+                return `<option value="${p.id}">${escapeHtml(name)} (${escapeHtml(p.email || '')})</option>`;
+            }).join('');
+            const instrumentOptions = (window.adminAssignmentInstruments || []).map(ins =>
+                `<option value="${ins.id}" data-max="${ins.max_regular_parts}">${escapeHtml(instrumentUiName(ins.name, ins.is_section))}</option>`
+            ).join('');
+            const listHtml = (people || []).map(p => {
+                const assigns = byUser[p.id] || [];
+                if (!assigns.length) return '';
+                const name = `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.email;
+                const items = assigns.map(row => {
+                    return `<div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-700/70 last:border-0">
+                        <span class="text-xs text-slate-200">${escapeHtml(assignmentRowLabel(row))}</span>
+                        <button type="button" data-del-assign="${row.id}" class="text-[10px] text-red-300 hover:text-red-200">Διαγραφή</button>
+                    </div>`;
+                }).join('');
+                return `<div class="mb-3 last:mb-0"><p class="text-[11px] font-semibold text-indigo-300 mb-1">${escapeHtml(name)}</p>${items}</div>`;
+            }).join('') || '<p class="text-xs text-slate-500">Δεν υπάρχουν αναθέσεις ακόμα.</p>';
+
+            return `
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4">
+                    <h3 class="text-sm font-bold text-indigo-300 mb-1">Διαχειριστής: Νέο μέλος</h3>
+                    <p class="text-[11px] text-slate-400 mb-3">Ένα άτομο, μία φόρμα. Μετά την αποθήκευση, στείλτε πρόσκληση από Supabase → Authentication → Users → Invite με το ίδιο email.</p>
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                        <input type="text" id="nm-first" placeholder="Όνομα" class="p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">
+                        <input type="text" id="nm-last" placeholder="Επώνυμο" class="p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">
+                    </div>
+                    <input type="email" id="nm-email" placeholder="Email" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                        <select id="nm-role" class="p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">
+                            <option value="musician">Μουσικός</option>
+                            <option value="conductor">Μαέστρος</option>
+                            <option value="admin">Διαχειριστής</option>
+                        </select>
+                        <label class="flex items-center gap-2 text-[11px] text-slate-300 px-1">
+                            <input type="checkbox" id="nm-beginner" class="rounded border-slate-600"> Μαθητής
+                        </label>
+                    </div>
+                    <select id="nm-instrument" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">
+                        <option value="">Χωρίς όργανο (π.χ. μαέστρος)</option>
+                        ${instrumentOptions}
+                    </select>
+                    <select id="nm-part" class="w-full mb-3 p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white"></select>
+                    <button type="button" id="nm-add" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded-lg text-xs font-semibold">Προσθήκη μέλους</button>
+                </div>
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4">
+                    <h3 class="text-sm font-bold text-indigo-300 mb-1">Διαχειριστής: Αναθέσεις οργάνων</h3>
+                    <p class="text-[11px] text-slate-400 mb-3">Όργανο και μέρος (π.χ. Alto Sax 2). Αφήστε το σετ κενό για όλες τις συναυλίες. Αν συμπληρώσετε σετ, για εκείνο το σετ βλέπουν μόνο τις αναθέσεις με αυτό το όνομα σετ — όχι τα γενικά όργανα.</p>
+                    <select id="asg-user" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">${personOptions}</select>
+                    <select id="asg-instrument" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">${instrumentOptions}</select>
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                        <select id="asg-part" class="p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white"></select>
+                        <input type="text" id="asg-set" placeholder="Σετ (προαιρετικό)" class="p-2.5 bg-slate-900 border border-slate-700 rounded text-xs text-white">
+                    </div>
+                    <button type="button" id="asg-add" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-lg text-xs font-semibold mb-4">Προσθήκη ανάθεσης</button>
+                    <div id="asg-list">${listHtml}</div>
+                </div>
+            `;
+        }
+
+        function refreshAdminPartSelect() {
+            fillPartSelect('asg-instrument', 'asg-part');
+        }
+
+        function refreshNewMemberPartSelect() {
+            fillPartSelect('nm-instrument', 'nm-part');
+        }
+
+        function fillPartSelect(instrumentSelectId, partSelectId) {
+            const instrumentSelect = document.getElementById(instrumentSelectId);
+            const partSelect = document.getElementById(partSelectId);
+            if (!instrumentSelect || !partSelect) return;
+            const selected = (window.adminAssignmentInstruments || []).find(ins => ins.id === instrumentSelect.value);
+            const maxParts = selected ? Number(selected.max_regular_parts) : 1;
+            let options = '<option value="">Χωρίς αριθμό μέρους</option>';
+            if (instrumentSelect.value) {
+                for (let n = 1; n <= maxParts; n += 1) options += `<option value="${n}">Μέρος ${n}</option>`;
+            }
+            partSelect.innerHTML = options;
+        }
+
+        function bindAdminAssignmentPanel() {
+            refreshAdminPartSelect();
+            refreshNewMemberPartSelect();
+            const instrumentSelect = document.getElementById('asg-instrument');
+            if (instrumentSelect) instrumentSelect.addEventListener('change', refreshAdminPartSelect);
+            const newMemberInstrument = document.getElementById('nm-instrument');
+            if (newMemberInstrument) newMemberInstrument.addEventListener('change', refreshNewMemberPartSelect);
+            const addBtn = document.getElementById('asg-add');
+            if (addBtn) addBtn.addEventListener('click', addInstrumentAssignment);
+            const addMemberBtn = document.getElementById('nm-add');
+            if (addMemberBtn) addMemberBtn.addEventListener('click', addRosterPerson);
+            document.querySelectorAll('[data-del-assign]').forEach(btn => {
+                btn.addEventListener('click', () => deleteInstrumentAssignment(btn.getAttribute('data-del-assign')));
+            });
+        }
+
+        async function addRosterPerson() {
+            if (!isAdminRole()) return;
+            const firstName = (document.getElementById('nm-first')?.value || '').trim();
+            const lastName = (document.getElementById('nm-last')?.value || '').trim();
+            const email = (document.getElementById('nm-email')?.value || '').trim();
+            const role = document.getElementById('nm-role')?.value || 'musician';
+            const isBeginner = !!document.getElementById('nm-beginner')?.checked;
+            const instrumentId = document.getElementById('nm-instrument')?.value || '';
+            const partRaw = document.getElementById('nm-part')?.value || '';
+            if (!firstName || !lastName || !email || !email.includes('@')) {
+                showAppNotice('Συμπληρώστε όνομα, επώνυμο και έγκυρο email.');
+                return;
+            }
+            const { data: created, error: profileError } = await supabaseClient.from('profiles').insert([{
+                email,
+                first_name: firstName,
+                last_name: lastName,
+                role,
+                instrument: 'Μη ορισμένο',
+                is_beginner: isBeginner
+            }]).select('id').maybeSingle();
+            if (profileError) {
+                showAppNotice(profileError.message);
+                return;
+            }
+            if (instrumentId && created?.id) {
+                const { error: assignError } = await supabaseClient.from('user_instruments').insert([{
+                    user_id: created.id,
+                    instrument_id: instrumentId,
+                    part_position: partRaw ? Number(partRaw) : null,
+                    concert_set: null
+                }]);
+                if (assignError) {
+                    showAppNotice('Το προφίλ δημιουργήθηκε, αλλά η ανάθεση οργάνου απέτυχε: ' + assignError.message);
+                    renderProfileTab();
+                    return;
+                }
+            }
+            showAppNotice('Το μέλος αποθηκεύτηκε. Στείλτε πρόσκληση από Authentication → Users → Invite με το ίδιο email.');
+            renderProfileTab();
+        }
+
+        async function addInstrumentAssignment() {
+            if (!isAdminRole()) return;
+            const userId = document.getElementById('asg-user')?.value;
+            const instrumentId = document.getElementById('asg-instrument')?.value;
+            const partRaw = document.getElementById('asg-part')?.value;
+            const concertSet = (document.getElementById('asg-set')?.value || '').trim();
+            if (!userId || !instrumentId) {
+                showAppNotice('Επιλέξτε μουσικό και όργανο.');
+                return;
+            }
+            const payload = {
+                user_id: userId,
+                instrument_id: instrumentId,
+                part_position: partRaw ? Number(partRaw) : null,
+                concert_set: concertSet || null
+            };
+            const { error } = await supabaseClient.from('user_instruments').insert([payload]);
+            if (error) {
+                showAppNotice(error.message);
+                return;
+            }
+            showAppNotice('Η ανάθεση αποθηκεύτηκε.');
+            renderProfileTab();
+        }
+
+        async function deleteInstrumentAssignment(id) {
+            if (!isAdminRole() || !id) return;
+            const { error } = await supabaseClient.from('user_instruments').delete().eq('id', id);
+            if (error) {
+                showAppNotice(error.message);
+                return;
+            }
+            showAppNotice('Η ανάθεση διαγράφηκε.');
+            renderProfileTab();
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
