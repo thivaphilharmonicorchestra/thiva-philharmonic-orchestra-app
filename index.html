@@ -385,6 +385,7 @@
             '127.0.0.1'
         ];
         const INTERNAL_DOCS_BUCKET = 'internal-docs';
+        const APP_ADMIN_CONTACT_EMAIL = 'vassilisrizos@gmail.com';
         const AUTH_IDB_NAME = 'thiva-philharmonic-auth';
         const PUSH_OPT_KEY = 'thiva-push-opt-in';
         const AUTH_IDB_DUMP_KEY = 'auth-dump';
@@ -4441,6 +4442,10 @@
                     <button onclick="startChangePassword()" class="w-full bg-slate-900 hover:bg-slate-700 border border-slate-600 text-white py-2.5 rounded-lg text-xs font-semibold transition">Αλλαγή κωδικού</button>
                 </div>
                 ${adminAssignmentsHtml}
+                <div class="px-0.5 mb-4 space-y-3">
+                    <p class="text-[11px] leading-relaxed text-slate-500">Η εφαρμογή, το λογότυπο, ο εσωτερικός κανονισμός και τα προσωπικά στοιχεία των μελών προορίζονται μόνο για τη Φιλαρμονική Ορχήστρα Θήβας. Οι παρτιτούρες διατίθενται στα μέλη αποκλειστικά για σκοπούς της Φιλαρμονικής· η αντιγραφή, κοινοποίηση ή δημόσια ανάρτηση χωρίς άδεια απαγορεύεται. Κάθε αντίγραφο που εξάγεται από την εφαρμογή φέρει σήμανση με τα στοιχεία του μέλους.</p>
+                    <p class="text-[11px] leading-relaxed text-slate-500">Αποθηκεύονται ονοματεπώνυμα, διευθύνσεις ηλεκτρονικού ταχυδρομείου, όργανο, δηλώσεις συμμετοχής, παρουσίες και, αν το ενεργοποιήσετε, συνδρομή ειδοποιήσεων, για την ορθή λειτουργία της Φιλαρμονικής. Πρόσβαση έχουν ο διαχειριστής και ο μαέστρος· κάθε μέλος βλέπει τα δικά του στοιχεία. Για διόρθωση ή διαγραφή στοιχείων επικοινωνήστε με τον διαχειριστή: <a href="mailto:${encodeURIComponent(APP_ADMIN_CONTACT_EMAIL)}" class="text-slate-400 underline break-all">${escapeHtml(APP_ADMIN_CONTACT_EMAIL)}</a>.</p>
+                </div>
                 <button onclick="handleLogout()" class="w-full bg-red-600/80 hover:bg-red-600 text-white font-semibold p-3 rounded-lg transition text-sm">Αποσύνδεση</button>
             `;
             if (isAdminRole()) {
