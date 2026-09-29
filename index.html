@@ -110,9 +110,28 @@
         #pdf-viewer-container > .viewer-float:not(#viewer-show-controls) {
             top: calc(env(safe-area-inset-top, 0px) + 12px);
         }
-        #app,
-        #content {
-            overscroll-behavior-y: none;
+        html.install-nudge-on #content {
+            padding-bottom: 13rem;
+        }
+        #install-nudge {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: calc(5.5rem + max(10px, env(safe-area-inset-bottom)));
+            z-index: 45;
+            max-width: 28rem;
+            margin: 0 auto;
+            padding: 0 10px;
+            pointer-events: none;
+        }
+        #install-nudge .install-nudge-card {
+            pointer-events: auto;
+        }
+        html.tablet-shell:not(.auth-narrow) #install-nudge {
+            max-width: none;
+        }
+        html.pdf-open #install-nudge {
+            display: none !important;
         }
         #canvas-wrapper {
             touch-action: manipulation;
@@ -331,6 +350,16 @@
             <!-- Loaded dynamically via JavaScript -->
         </div>
 
+        <div id="install-nudge" class="hidden" role="region" aria-label="Εγκατάσταση εφαρμογής">
+            <div class="install-nudge-card bg-slate-800/95 backdrop-blur border border-indigo-500/40 rounded-xl p-3 shadow-lg">
+                <p class="text-[11px] leading-relaxed text-slate-200 mb-2">Για να λαμβάνετε ειδοποιήσεις, εγκαταστήστε την εφαρμογή και ανοίξτε την από το εικονίδιο, όχι από καρτέλα.</p>
+                <div class="flex gap-2">
+                    <button type="button" id="install-nudge-how" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold py-2 rounded-lg">Οδηγίες</button>
+                    <button type="button" id="install-nudge-later" class="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-100 text-[11px] font-semibold py-2 rounded-lg">Αργότερα</button>
+                </div>
+            </div>
+        </div>
+
         <!-- NAVIGATION BAR (Visible when logged in) -->
         <nav id="navbar" class="app-navbar hidden fixed left-0 right-0 bg-slate-800/95 backdrop-blur border-t border-slate-700 flex items-center justify-around px-1 py-1.5 max-w-md mx-auto z-50">
             <button onclick="switchTab('music')" id="nav-music" class="flex-1 flex flex-col items-center justify-center text-slate-400 font-medium text-[10px] leading-tight h-12"><svg aria-hidden="true" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l10-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="16" cy="16" r="3"></circle></svg><span class="block mt-1">Παρτιτούρες</span></button>
@@ -388,6 +417,8 @@
         const APP_ADMIN_CONTACT_EMAIL = 'vassilisrizos@gmail.com';
         const AUTH_IDB_NAME = 'thiva-philharmonic-auth';
         const PUSH_OPT_KEY = 'thiva-push-opt-in';
+        const INSTALL_NUDGE_LATER_KEY = 'thiva-install-nudge-later';
+        const PUSH_PROMPT_SKIP_KEY = 'thiva-push-prompt-skip';
         const AUTH_IDB_DUMP_KEY = 'auth-dump';
 
         function openAuthIdb() {
@@ -1176,6 +1207,107 @@
             return isIosDevice() || isAndroidDevice();
         }
 
+        function installAppHowToMessage() {
+            if (isIosDevice()) {
+                return [
+                    'Προσθήκη στην οθόνη Αφετηρίας',
+                    '',
+                    '1. Στο Safari πατήστε Κοινοποίηση.',
+                    '2. Προσθήκη στην οθόνη Αφετηρίας.',
+                    '3. Ανοίξτε την εφαρμογή μόνο από το εικονίδιο, όχι από καρτέλα. Οι ειδοποιήσεις δουλεύουν από εκεί.'
+                ].join('\n');
+            }
+            return [
+                'Εγκατάσταση εφαρμογής',
+                '',
+                '1. Στο Chrome πατήστε το μενού ⋮.',
+                '2. Εγκατάσταση εφαρμογής ή Προσθήκη στην αρχική οθόνη.',
+                '3. Ανοίξτε την μόνο από το εικονίδιο, όχι από καρτέλα.'
+            ].join('\n');
+        }
+
+        function bindInstallNudgeButtons() {
+            const how = document.getElementById('install-nudge-how');
+            const later = document.getElementById('install-nudge-later');
+            if (how && !how.dataset.bound) {
+                how.dataset.bound = '1';
+                how.onclick = () => showAppStepsDialog(installAppHowToMessage());
+            }
+            if (later && !later.dataset.bound) {
+                later.dataset.bound = '1';
+                later.onclick = () => {
+                    try { sessionStorage.setItem(INSTALL_NUDGE_LATER_KEY, '1'); } catch {}
+                    syncInstallNudge();
+                };
+            }
+        }
+
+        function shouldShowInstallNudge() {
+            if (!currentUser || requirePasswordSetup) return false;
+            if (!isOfficialAppHost()) return false;
+            if (!isPhoneOrTablet() || isStandaloneDisplay()) return false;
+            try {
+                if (sessionStorage.getItem(INSTALL_NUDGE_LATER_KEY) === '1') return false;
+            } catch {}
+            const nav = document.getElementById('navbar');
+            if (!nav || nav.classList.contains('hidden')) return false;
+            return true;
+        }
+
+        function syncInstallNudge() {
+            bindInstallNudgeButtons();
+            const show = shouldShowInstallNudge();
+            document.getElementById('install-nudge')?.classList.toggle('hidden', !show);
+            document.documentElement.classList.toggle('install-nudge-on', show);
+        }
+
+        let pushPromptInFlight = false;
+        function confirmPushEnablePrompt() {
+            return new Promise((resolve) => {
+                document.getElementById('app-push-prompt')?.remove();
+                const dialog = document.createElement('div');
+                dialog.id = 'app-push-prompt';
+                dialog.className = 'fixed inset-0 z-[10002] bg-black/60 flex items-center justify-center p-4';
+                dialog.innerHTML = `
+                    <div class="bg-slate-800 border border-slate-600 rounded-2xl p-4 w-full max-w-sm">
+                        <p class="text-sm text-slate-100 mb-4 leading-relaxed">Για ανακοινώσεις και υπενθυμίσεις δηλώσεων, ενεργοποιήστε τις ειδοποιήσεις.</p>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button type="button" id="app-push-later" class="py-2.5 rounded-lg bg-slate-700 text-white text-sm font-semibold">Αργότερα</button>
+                            <button type="button" id="app-push-yes" class="py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold">Ενεργοποίηση</button>
+                        </div>
+                    </div>`;
+                document.body.appendChild(dialog);
+                dialog.querySelector('#app-push-later').onclick = () => { dialog.remove(); resolve(false); };
+                dialog.querySelector('#app-push-yes').onclick = () => { dialog.remove(); resolve(true); };
+            });
+        }
+
+        async function maybeOfferPushPrompt() {
+            if (pushPromptInFlight) return;
+            if (!currentUser || requirePasswordSetup) return;
+            if (!isStandaloneDisplay() || !isPhoneOrTablet()) return;
+            if (pdfViewerOpen()) return;
+            try {
+                if (localStorage.getItem(PUSH_PROMPT_SKIP_KEY) === '1') return;
+                if (localStorage.getItem(PUSH_OPT_KEY) === '0') return;
+            } catch {
+                return;
+            }
+            if (pushSubscription) return;
+            if (!('Notification' in window) || Notification.permission === 'denied') return;
+
+            pushPromptInFlight = true;
+            try {
+                const enable = await confirmPushEnablePrompt();
+                if (enable) await enablePushNotifications();
+                else {
+                    try { localStorage.setItem(PUSH_PROMPT_SKIP_KEY, '1'); } catch {}
+                }
+            } finally {
+                pushPromptInFlight = false;
+            }
+        }
+
         function pushSubscribeHelpMessage() {
             const title = 'Σφάλμα ενεργοποίησης ειδοποιήσεων.';
             if (!isPhoneOrTablet()) {
@@ -1556,6 +1688,7 @@
         function renderLogin(message = '') {
             setAuthNarrow(true);
             document.getElementById('navbar').classList.add('hidden');
+            syncInstallNudge();
             if (!isOfficialAppHost()) {
                 document.getElementById('content').innerHTML = `
                     <div class="flex flex-col items-center justify-center min-h-[85vh] text-center px-4">
@@ -1594,6 +1727,7 @@
                     : 'Καλώς ήρθατε. Ορίστε τον κωδικό σας για να ολοκληρώσετε την πρόσκληση.');
             document.getElementById('navbar').classList.add('hidden');
             setAuthNarrow(true);
+            syncInstallNudge();
             document.getElementById('content').innerHTML = `
                 <div class="flex flex-col items-center justify-center min-h-[85vh] text-center">
                     <img src="${LOGO_URL}" alt="Logo" class="w-20 h-20 mb-3 object-contain drop-shadow-md">
@@ -1726,6 +1860,8 @@
             else if (activeTab === 'attendance') runTabLoad(renderAttendanceTab);
             else if (activeTab === 'profile') runTabLoad(renderProfileTab);
             else if (activeTab === 'notifications') runTabLoad(renderNotificationsTab);
+            syncInstallNudge();
+            maybeOfferPushPrompt();
         }
 
         async function renderHomeTab() {
@@ -2507,6 +2643,8 @@
                 annotationsDirty = false;
             } finally {
                 pdfViewerClosing = false;
+                syncInstallNudge();
+                maybeOfferPushPrompt();
             }
         }
 
@@ -4073,6 +4211,7 @@
 
                 if (saveErr) throw saveErr;
 
+                try { localStorage.setItem(PUSH_PROMPT_SKIP_KEY, '1'); } catch {}
                 showAppToast('Επιτυχής ενεργοποίηση ειδοποιήσεων.', 'notify');
                 renderProfileTab();
             } catch (e) {
