@@ -89,6 +89,11 @@
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
         }
+        .ui-icon {
+            display: inline-block;
+            vertical-align: -0.2em;
+            flex-shrink: 0;
+        }
         html.tablet-shell:not(.auth-narrow) #app,
         html.tablet-shell:not(.auth-narrow) #navbar {
             max-width: none;
@@ -601,6 +606,28 @@
                 '"': '&quot;',
                 "'": '&#39;'
             }[char]));
+        }
+
+        const UI_ICON_PATHS = {
+            'calendar-dots': 'M208,32H184V24a8,8,0,0,0-16,0v8H88V24a8,8,0,0,0-16,0v8H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32ZM72,48v8a8,8,0,0,0,16,0V48h80v8a8,8,0,0,0,16,0V48h24V80H48V48ZM208,208H48V96H208V208Zm-68-76a12,12,0,1,1-12-12A12,12,0,0,1,140,132Zm44,0a12,12,0,1,1-12-12A12,12,0,0,1,184,132ZM96,172a12,12,0,1,1-12-12A12,12,0,0,1,96,172Zm44,0a12,12,0,1,1-12-12A12,12,0,0,1,140,172Zm44,0a12,12,0,1,1-12-12A12,12,0,0,1,184,172Z',
+            'map-pin': 'M128,64a40,40,0,1,0,40,40A40,40,0,0,0,128,64Zm0,64a24,24,0,1,1,24-24A24,24,0,0,1,128,128Zm0-112a88.1,88.1,0,0,0-88,88c0,31.4,14.51,64.68,42,96.25a254.19,254.19,0,0,0,41.45,38.3,8,8,0,0,0,9.18,0A254.19,254.19,0,0,0,174,200.25c27.45-31.57,42-64.85,42-96.25A88.1,88.1,0,0,0,128,16Zm0,206c-16.53-13-72-60.75-72-118a72,72,0,0,1,144,0C200,161.23,144.53,209,128,222Z',
+            'coat-hanger': 'M241.57,171.2,141.33,96l23.46-17.6A8,8,0,0,0,168,72a40,40,0,1,0-80,0,8,8,0,0,0,16,0,24,24,0,0,1,47.69-3.78L123.34,89.49l-.28.21L14.43,171.2A16,16,0,0,0,24,200H232a16,16,0,0,0,9.6-28.8ZM232,184H24l104-78,104,78Z',
+            'magnifying-glass': 'M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z',
+            'check-circle': 'M173.66,98.34a8,8,0,0,1,0,11.32l-56,56a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35A8,8,0,0,1,173.66,98.34ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z',
+            'x-circle': 'M165.66,101.66,139.31,128l26.35,26.34a8,8,0,0,1-11.32,11.32L128,139.31l-26.34,26.35a8,8,0,0,1-11.32-11.32L116.69,128,90.34,101.66a8,8,0,0,1,11.32-11.32L128,116.69l26.34-26.35a8,8,0,0,1,11.32,11.32ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z',
+            'cell-tower': 'M135.16,84.42a8,8,0,0,0-14.32,0l-72,144a8,8,0,0,0,14.31,7.16L77,208h102.1l13.79,27.58A8,8,0,0,0,200,240a8,8,0,0,0,7.15-11.58ZM128,105.89,155.06,160H100.94ZM85,192l8-16h70.1l8,16Zm74.54-98.26a32,32,0,1,0-63,0,8,8,0,1,1-15.74,2.85,48,48,0,1,1,94.46,0,8,8,0,0,1-7.86,6.58,8.74,8.74,0,0,1-1.43-.13A8,8,0,0,1,159.49,93.74ZM64.15,136.21a80,80,0,1,1,127.7,0,8,8,0,0,1-12.76-9.65,64,64,0,1,0-102.18,0,8,8,0,0,1-12.76,9.65Z',
+            bell: 'M221.8,175.94C216.25,166.38,208,139.33,208,104a80,80,0,1,0-160,0c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0H208a16,16,0,0,0,13.8-24.06ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a64,64,0,1,1,128,0c0,36.05,8.28,66.73,16,80Z',
+            'file-pdf': 'M224,152a8,8,0,0,1-8,8H192v16h16a8,8,0,0,1,0,16H192v16a8,8,0,0,1-16,0V152a8,8,0,0,1,8-8h32A8,8,0,0,1,224,152ZM92,172a28,28,0,0,1-28,28H56v8a8,8,0,0,1-16,0V152a8,8,0,0,1,8-8H64A28,28,0,0,1,92,172Zm-16,0a12,12,0,0,0-12-12H56v24h8A12,12,0,0,0,76,172Zm88,8a36,36,0,0,1-36,36H112a8,8,0,0,1-8-8V152a8,8,0,0,1,8-8h16A36,36,0,0,1,164,180Zm-16,0a20,20,0,0,0-20-20h-8v40h8A20,20,0,0,0,148,180ZM40,112V40A16,16,0,0,1,56,24h96a8,8,0,0,1,5.66,2.34l56,56A8,8,0,0,1,216,88v24a8,8,0,0,1-16,0V96H152a8,8,0,0,1-8-8V40H56v72a8,8,0,0,1-16,0ZM160,80h28.69L160,51.31Z'
+        };
+
+        function uiIcon(name, extraClass = 'h-3.5 w-3.5') {
+            const d = UI_ICON_PATHS[name];
+            if (!d) return '';
+            return `<svg aria-hidden="true" class="ui-icon ${extraClass}" viewBox="0 0 256 256" fill="currentColor"><path d="${d}"></path></svg>`;
+        }
+
+        function uiIconText(name, html, extraClass = 'h-3.5 w-3.5') {
+            return `<span class="inline-flex items-center gap-1 min-w-0">${uiIcon(name, extraClass)}<span class="min-w-0">${html}</span></span>`;
         }
 
         function showAppNotice(message) {
@@ -1123,6 +1150,23 @@
             registerServiceWorker();
             initPushSupport();
             applyLocationHash();
+            if ((location.hostname === 'localhost' || location.hostname === '127.0.0.1') && location.hash === '#icon-preview') {
+                document.getElementById('navbar').classList.add('hidden');
+                setAuthNarrow(true);
+                const names = Object.keys(UI_ICON_PATHS);
+                document.getElementById('content').innerHTML = `
+                    <h1 class="text-xl font-bold mb-2">Δοκιμή εικονιδίων</h1>
+                    <p class="text-xs text-slate-400 mb-4">Μόνο σε localhost. Αφαιρέστε το #icon-preview για κανονική είσοδο.</p>
+                    <div class="space-y-2 mb-4">${names.map(n => `<div class="flex items-center gap-3 bg-slate-800 p-3 rounded-xl border border-slate-700 text-indigo-300">${uiIcon(n, 'h-6 w-6')}<span class="text-sm text-white">${n}</span></div>`).join('')}</div>
+                    <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-xs text-slate-300 space-y-2">
+                        <p class="text-indigo-300">${uiIconText('calendar-dots', '12 Οκτωβρίου 2026, 19:30')}</p>
+                        <p>${uiIconText('map-pin', 'Ωδείο')}</p>
+                        <p>${uiIconText('coat-hanger', 'Ενδυμασία: Καθημερινή')}</p>
+                        <p class="text-emerald-400">${uiIconText('check-circle', 'Θα είμαι εκεί')}</p>
+                        <p class="text-red-400">${uiIconText('x-circle', 'Δεν μπορώ')}</p>
+                    </div>`;
+                return;
+            }
 
             const cbInfo = authCallbackParams();
             if (isPasswordSetupCallback(cbInfo)) {
@@ -1988,8 +2032,8 @@
                     <section class="bg-gradient-to-br from-indigo-700 to-indigo-900 p-4 rounded-2xl shadow-lg mb-4">
                         <p class="text-xs text-indigo-200 font-semibold tracking-wide">ΕΠΟΜΕΝΗ ΕΚΔΗΛΩΣΗ</p>
                         <h2 class="text-xl font-bold text-white mt-1">${escapeHtml(nextEvent.event_name)}</h2>
-                        <p class="text-sm text-indigo-100 mt-2">📅 ${escapeHtml(formatGreekDateOnly(nextEvent.date))}${nextEvent.time ? ` · ${escapeHtml(formatEventTime(nextEvent.time))}` : ''}</p>
-                        ${nextEvent.location ? `<p class="text-xs text-indigo-200 mt-1">📍 ${formatEventLocation(nextEvent.location)}</p>` : ''}
+                        <p class="text-sm text-indigo-100 mt-2">${uiIconText('calendar-dots', `${escapeHtml(formatGreekDateOnly(nextEvent.date))}${nextEvent.time ? ` · ${escapeHtml(formatEventTime(nextEvent.time))}` : ''}`)}</p>
+                        ${nextEvent.location ? `<p class="text-xs text-indigo-200 mt-1">${uiIconText('map-pin', formatEventLocation(nextEvent.location))}</p>` : ''}
                         <button onclick="switchTab('events')" class="mt-3 bg-white/15 hover:bg-white/25 px-3 py-2 rounded-lg text-xs font-semibold text-white">Προβολή προγράμματος</button>
                     </section>
                 `;
@@ -2169,8 +2213,9 @@
                 </div>
                 <div class="bg-slate-800 p-3 rounded-xl border border-slate-700 mb-3 space-y-2">
                     <div class="relative">
-                        <input type="search" id="mf-search" value="${escapeHtml(musicFilter.search)}" placeholder="🔍 Αναζήτηση τίτλου, συνθέτη..."
-                            class="w-full p-2 pr-10 bg-slate-900 border border-slate-700 rounded text-sm text-white [appearance:textfield] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden">
+                        <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">${uiIcon('magnifying-glass', 'h-4 w-4')}</span>
+                        <input type="search" id="mf-search" value="${escapeHtml(musicFilter.search)}" placeholder="Αναζήτηση τίτλου, συνθέτη..."
+                            class="w-full p-2 pl-9 pr-10 bg-slate-900 border border-slate-700 rounded text-sm text-white [appearance:textfield] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden">
                         <button type="button" id="mf-search-clear" aria-label="Καθαρισμός αναζήτησης"
                             class="${musicFilter.search.trim() ? '' : 'hidden '}absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 flex items-center justify-center rounded-md text-slate-300 hover:text-white hover:bg-slate-700 text-xl leading-none">
                             ×
@@ -3479,7 +3524,7 @@
                 displayedEvents = displayedEvents.filter(ev => ev.date === selectedCalendarDate);
                 html += `
                     <div class="flex justify-between items-center bg-slate-800/60 p-2.5 rounded-lg border border-slate-700 mb-3 text-xs">
-                        <span class="text-indigo-300">📅 Προβολή ημέρας: <b>${formatGreekDateOnly(selectedCalendarDate)}</b></span>
+                        <span class="text-indigo-300 inline-flex items-center gap-1">${uiIcon('calendar-dots')} Προβολή ημέρας: <b>${formatGreekDateOnly(selectedCalendarDate)}</b></span>
                         <button onclick="selectedCalendarDate = null; renderEventsTab();" class="text-slate-400 hover:text-white underline">Εμφάνιση όλων</button>
                     </div>
                 `;
@@ -3510,11 +3555,11 @@
                     if (myStatus === 'Going') {
                         goingBtnClass += "bg-emerald-600 text-white ring-2 ring-white shadow-md font-bold";
                         notGoingBtnClass += "bg-slate-800 text-slate-500 border border-slate-700 opacity-40 hover:opacity-100";
-                        statusLabel = '<span class="text-slate-400">Κατάσταση: <b class="text-emerald-400">Θα είμαι εκεί ✅</b></span>';
+                        statusLabel = `<span class="text-slate-400 inline-flex items-center gap-1 flex-wrap">Κατάσταση: <b class="text-emerald-400 inline-flex items-center gap-1">${uiIcon('check-circle')} Θα είμαι εκεί</b></span>`;
                     } else if (myStatus === 'Not Going') {
                         goingBtnClass += "bg-slate-800 text-slate-500 border border-slate-700 opacity-40 hover:opacity-100";
                         notGoingBtnClass += "bg-red-600 text-white ring-2 ring-white shadow-md font-bold";
-                        statusLabel = `<span class="text-slate-400">Κατάσταση: <b class="text-red-400">Δεν μπορώ ❌</b> <span class="text-[10px] italic">(${myResp.excuse || 'Χωρίς αιτιολογία'})</span></span>`;
+                        statusLabel = `<span class="text-slate-400 inline-flex items-center gap-1 flex-wrap">Κατάσταση: <b class="text-red-400 inline-flex items-center gap-1">${uiIcon('x-circle')} Δεν μπορώ</b> <span class="text-[10px] italic font-normal">(${myResp.excuse || 'Χωρίς αιτιολογία'})</span></span>`;
                     } else {
                         goingBtnClass += "bg-emerald-600 hover:bg-emerald-500 text-white";
                         notGoingBtnClass += "bg-red-600 hover:bg-red-500 text-white";
@@ -3539,8 +3584,8 @@
                                 <h3 class="font-bold text-base text-white">${escapeHtml(ev.event_name)}</h3>
                                 ${typeBadge}
                             </div>
-                            <p class="text-xs text-indigo-300 mb-1">📅 ${dateTimeDisplay}</p>
-                            <p class="text-xs text-slate-400 mb-2">📍 ${locationHtml} | 👔 Ενδυμασία: ${escapeHtml(ev.dress_code || 'Καθημερινή')}</p>
+                            <p class="text-xs text-indigo-300 mb-1">${uiIconText('calendar-dots', dateTimeDisplay)}</p>
+                            <p class="text-xs text-slate-400 mb-2 inline-flex items-center flex-wrap gap-x-1 gap-y-1">${uiIconText('map-pin', locationHtml)} <span class="text-slate-600">|</span> ${uiIconText('coat-hanger', `Ενδυμασία: ${escapeHtml(ev.dress_code || 'Καθημερινή')}`)}</p>
                             ${ev.notes ? `<p class="text-xs bg-slate-900 p-2.5 rounded mb-3 text-slate-300 whitespace-pre-wrap">${escapeHtml(ev.notes)}</p>` : ''}
                             <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between border-t border-slate-700 pt-3 gap-2">
                                 <div class="text-xs">${statusLabel}</div>
@@ -3714,7 +3759,7 @@
                         const rsvpBoxes = `
                                 <div class="grid grid-cols-2 gap-2 mb-3 text-xs">
                                     <div class="bg-slate-900 p-2.5 rounded border border-slate-700/60">
-                                        <span class="text-emerald-400 font-semibold block mb-1">✅ Δήλωσαν ότι θα πάνε (${goingList.length})</span>
+                                        <span class="text-emerald-400 font-semibold mb-1 inline-flex items-center gap-1">${uiIcon('check-circle')} Δήλωσαν ότι θα πάνε (${goingList.length})</span>
                                         ${goingList.length === 0 ? '<span class="text-slate-500 italic">Καμία δήλωση</span>' :
                                           goingList.map(r => {
                                             const profile = profilesByEmail.get(String(r.user_email || '').trim().toLowerCase());
@@ -3723,7 +3768,7 @@
                                           }).join('')}
                                     </div>
                                     <div class="bg-slate-900 p-2.5 rounded border border-slate-700/60">
-                                        <span class="text-red-400 font-semibold block mb-1">❌ Δήλωσαν απουσία (${notGoingList.length})</span>
+                                        <span class="text-red-400 font-semibold mb-1 inline-flex items-center gap-1">${uiIcon('x-circle')} Δήλωσαν απουσία (${notGoingList.length})</span>
                                         ${notGoingList.length === 0 ? '<span class="text-slate-500 italic">Κανένας</span>' :
                                           notGoingList.map(r => {
                                             const profile = profilesByEmail.get(String(r.user_email || '').trim().toLowerCase());
@@ -3766,7 +3811,7 @@
                                     <h3 class="font-bold text-base text-white">${escapeHtml(ev.event_name)}</h3>
                                     ${typeBadge}
                                 </div>
-                                <p class="text-xs text-indigo-300 mb-3">📅 ${dateTimeDisplay}</p>
+                                <p class="text-xs text-indigo-300 mb-3">${uiIconText('calendar-dots', dateTimeDisplay)}</p>
                                 ${lockHint}
                                 ${rsvpBoxes}
                                 ${rollCall}
@@ -4375,7 +4420,7 @@
             preview.className = 'hidden';
             result.classList.remove('hidden');
             result.className = 'text-xs rounded p-2 space-y-1 bg-slate-900 border border-slate-700';
-            result.innerHTML = `<span class="text-slate-300">📡 Σύνδεση με τον server...</span>`;
+            result.innerHTML = `<span class="text-slate-300 inline-flex items-center gap-1.5">${uiIcon('cell-tower', 'h-4 w-4')} Σύνδεση με τον server...</span>`;
 
             try {
                 const { data: { session } } = await supabaseClient.auth.getSession();
@@ -4428,7 +4473,7 @@
                 ? `<div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-red-500/15 text-red-400">
                     <svg aria-hidden="true" class="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10 19a2 2 0 0 0 4 0"></path><path d="M9.2 10.2 14.8 15.8"></path><path d="M14.8 10.2 9.2 15.8"></path></svg>
                    </div>`
-                : `<div class="text-3xl mb-2">✅</div>`;
+                : `<div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400">${uiIcon('check-circle', 'h-8 w-8')}</div>`;
             toast.innerHTML = `
                 <div class="bg-slate-800 border ${border} rounded-2xl p-5 w-full max-w-sm text-center">
                     ${icon}
@@ -4620,7 +4665,7 @@
                     <div class="${pushActive ? 'bg-emerald-900/30 border-emerald-700/50' : 'bg-slate-800/60 border-slate-700'} border rounded-xl p-4 mb-4">
                         <div class="flex items-start justify-between gap-3 mb-1">
                             <div>
-                                <h4 class="text-sm font-bold ${pushActive ? 'text-emerald-300' : 'text-indigo-300'}">${pushActive ? '🔔 Ειδοποιήσεις Ενεργές' : '🔔 Push Ειδοποιήσεις'}</h4>
+                                <h4 class="text-sm font-bold ${pushActive ? 'text-emerald-300' : 'text-indigo-300'} inline-flex items-center gap-1.5">${uiIcon('bell', 'h-4 w-4')}${pushActive ? 'Ειδοποιήσεις Ενεργές' : 'Push Ειδοποιήσεις'}</h4>
                                 <p class="text-[11px] ${pushActive ? 'text-emerald-400/80' : 'text-slate-400'} mt-0.5">${pushActive ? 'Θα λαμβάνετε ειδοποιήσεις της εφαρμογής και ανακοινώσεις του μαέστρου.' : 'Ενεργοποιήστε για να λαμβάνετε άμεσες ειδοποιήσεις της εφαρμογής και ανακοινώσεις του μαέστρου.'}</p>
                             </div>
                             <button type="button" class="push-switch ${pushActive ? 'on' : ''}" role="switch" aria-checked="${pushActive ? 'true' : 'false'}" aria-label="Ειδοποιήσεις" onclick="togglePushNotifications()"></button>
@@ -4630,7 +4675,7 @@
             } else {
                 pushSection = `
                     <div class="bg-slate-800/60 border border-slate-700 rounded-xl p-4 mb-4">
-                        <h4 class="text-sm font-bold text-indigo-300">🔔 Push Ειδοποιήσεις</h4>
+                        <h4 class="text-sm font-bold text-indigo-300 inline-flex items-center gap-1.5">${uiIcon('bell', 'h-4 w-4')} Push Ειδοποιήσεις</h4>
                         <p class="text-[11px] text-slate-400 mt-1">${pushUnsupportedMessage()}</p>
                     </div>
                 `;
@@ -4666,7 +4711,7 @@
                 </div>
                 <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4">
                     <button type="button" onclick="openInternalRegulations()" class="w-full text-left">
-                        <h3 class="text-sm font-bold text-indigo-300">📄 Εσωτερικός Κανονισμός Φιλαρμονικής</h3>
+                        <h3 class="text-sm font-bold text-indigo-300 inline-flex items-center gap-1.5">${uiIcon('file-pdf', 'h-4 w-4')} Εσωτερικός Κανονισμός Φιλαρμονικής</h3>
                         <p class="text-[11px] text-slate-400 mt-1">${escapeHtml(regulationsUpdated)}</p>
                     </button>
                     ${isAdminRole() ? `
