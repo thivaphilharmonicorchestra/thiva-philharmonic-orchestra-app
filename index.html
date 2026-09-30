@@ -1332,6 +1332,45 @@
             }
         }
 
+        function requestNotificationPermission() {
+            if (!('Notification' in window)) return Promise.resolve('denied');
+            if (Notification.permission === 'granted' || Notification.permission === 'denied') {
+                return Promise.resolve(Notification.permission);
+            }
+            try {
+                const result = Notification.requestPermission();
+                if (result && typeof result.then === 'function') return result;
+            } catch (e) {}
+            return new Promise((resolve) => {
+                Notification.requestPermission((perm) => resolve(perm || Notification.permission));
+            });
+        }
+
+        function notificationPermissionDeniedHelp() {
+            const host = (location.hostname || '').replace(/^www\./, '') || 'thivaphilharmonicorchestra.github.io';
+            if (isAndroidDevice()) {
+                return [
+                    'Οι ειδοποιήσεις έχουν αποκλειστεί για αυτή την εφαρμογή.',
+                    '',
+                    'Δεν αρκεί να τις κλείσετε και να τις ανοίξετε στις Ρυθμίσεις του Android. Το Chrome έχει μπλοκάρει τον ιστότοπο και δεν ξαναρωτά.',
+                    '',
+                    '1. Κλείστε τελείως την εφαρμογή (από τα πρόσφατα).',
+                    '2. Ανοίξτε το Chrome → μενού ⋮ → Ρυθμίσεις → Ρυθμίσεις ιστότοπων → Ειδοποιήσεις.',
+                    `3. Αν το ${host} είναι στα Αποκλεισμένα, πατήστε το και επιλέξτε Να επιτρέπεται.`,
+                    `4. Αν δεν το βλέπετε: Ρυθμίσεις ιστότοπων → ${host} → Ειδοποιήσεις → Να επιτρέπεται.`,
+                    '5. Ανοίξτε την εφαρμογή μόνο από το εικονίδιο και στο Προφίλ ενεργοποιήστε τις ειδοποιήσεις.'
+                ].join('\n');
+            }
+            if (isIosDevice()) {
+                return [
+                    'Οι ειδοποιήσεις έχουν αποκλειστεί για αυτή την εφαρμογή.',
+                    '',
+                    'Ρυθμίσεις iPhone → Ειδοποιήσεις → Φιλαρμονική: επιτρέψτε τις. Ανοίξτε την εφαρμογή από την οθόνη Αφετηρίας και δοκιμάστε ξανά στο Προφίλ.'
+                ].join('\n');
+            }
+            return 'Οι ειδοποιήσεις έχουν αποκλειστεί για αυτόν τον ιστότοπο. Επιτρέψτε τις στις ρυθμίσεις του προγράμματος περιήγησης και δοκιμάστε ξανά.';
+        }
+
         function pushSubscribeHelpMessage() {
             const title = 'Σφάλμα ενεργοποίησης ειδοποιήσεων.';
             if (!isPhoneOrTablet()) {
@@ -4232,11 +4271,15 @@
             try {
                 const reg = await readyPushRegistration();
                 if (!reg) throw new Error('Δεν ήταν δυνατή η ενεργοποίηση του Service Worker.');
-                const permission = await Notification.requestPermission();
+                const permission = await requestNotificationPermission();
                 if (permission !== 'granted') {
                     localStorage.setItem(PUSH_OPT_KEY, '0');
                     setPushSwitchState(false);
-                    showAppNotice('Η άδεια ειδοποιήσεων δεν εγκρίθηκε.');
+                    if (permission === 'denied' || Notification.permission === 'denied') {
+                        showAppStepsDialog(notificationPermissionDeniedHelp());
+                    } else {
+                        showAppNotice('Η άδεια ειδοποιήσεων δεν εγκρίθηκε.');
+                    }
                     return;
                 }
 
