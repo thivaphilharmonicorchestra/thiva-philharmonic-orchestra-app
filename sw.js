@@ -1,5 +1,6 @@
-const CACHE_VERSION = 'thiva-philharmonic-v82';
+const CACHE_VERSION = 'thiva-philharmonic-v85';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
+const PUSH_OPEN_CACHE = 'thiva-philharmonic-push-open';
 
 const STATIC_ASSETS = [
     './',
@@ -33,7 +34,7 @@ self.addEventListener('activate', (event) => {
     event.waitUntil(
         caches.keys().then((keys) => {
             return Promise.all(
-                keys.filter(k => !k.startsWith(CACHE_VERSION)).map(k => caches.delete(k))
+                keys.filter(k => !k.startsWith(CACHE_VERSION) && k !== PUSH_OPEN_CACHE).map(k => caches.delete(k))
             );
         }).then(() => self.clients.claim())
     );
@@ -104,7 +105,11 @@ self.addEventListener('push', (event) => {
         badge: data.badge || `${self.registration.scope}thiva_app_icon.png`,
         vibrate: [200, 100, 200],
         tag: data.tag || 'thiva-philharmonic-notification',
-        data: { url: safeNotificationUrl(data.data && data.data.url) },
+        data: {
+            url: safeNotificationUrl(data.data && data.data.url),
+            title: data.title || 'Φιλαρμονική Ορχήστρα Θήβας',
+            body: data.body || ''
+        },
         silent: false
     };
 
@@ -112,17 +117,43 @@ self.addEventListener('push', (event) => {
     event.waitUntil(self.registration.showNotification(title, options));
 });
 
+function stashPushOpen(title, body) {
+    const payload = JSON.stringify({
+        title: title || '',
+        body: body || '',
+        at: Date.now()
+    });
+    return caches.open(PUSH_OPEN_CACHE).then((cache) => cache.put(
+        'last',
+        new Response(payload, { headers: { 'Content-Type': 'application/json' } })
+    ));
+}
+
+function notifyClientsPushOpen(title, body) {
+    return self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+        clients.forEach((c) => {
+            try {
+                c.postMessage({ type: 'thiva-push-open', title: title || '', body: body || '' });
+            } catch (e) {}
+        });
+    });
+}
+
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
-    const url = safeNotificationUrl(event.notification.data && event.notification.data.url);
+    const nd = event.notification.data || {};
+    const url = safeNotificationUrl(nd.url);
+    const title = nd.title || event.notification.title || '';
+    const body = nd.body || event.notification.body || '';
     event.waitUntil(
-        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
-            for (const c of clients) {
-                if ('focus' in c) {
-                    return c.focus().then(() => c.navigate(url));
+        stashPushOpen(title, body).then(() =>
+            self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+                const existing = clients.find((c) => 'focus' in c);
+                if (existing) {
+                    return existing.focus().then(() => existing.navigate(url)).then(() => notifyClientsPushOpen(title, body));
                 }
-            }
-            if (self.clients.openWindow) return self.clients.openWindow(url);
-        })
+                if (self.clients.openWindow) return self.clients.openWindow(url);
+            })
+        )
     );
 });
