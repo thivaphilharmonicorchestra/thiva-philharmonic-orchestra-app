@@ -413,6 +413,7 @@
             'localhost',
             '127.0.0.1'
         ];
+        const OFFICIAL_APP_ORIGIN = 'https://thivaphilharmonicorchestra.github.io/thiva-philharmonic-orchestra-app/';
         const INTERNAL_DOCS_BUCKET = 'internal-docs';
         const APP_ADMIN_CONTACT_EMAIL = 'vassilisrizos@gmail.com';
         const AUTH_IDB_NAME = 'thiva-philharmonic-auth';
@@ -1418,7 +1419,15 @@
             if ('serviceWorker' in navigator) {
                 navigator.serviceWorker.addEventListener('message', (event) => {
                     const d = event.data;
-                    if (d && d.type === 'thiva-push-open') showPushOpenDialog(d.title, d.body);
+                    if (d && d.type === 'thiva-push-open') {
+                        if (d.url) {
+                            try {
+                                const next = new URL(d.url, location.href);
+                                if (next.origin === location.origin && next.hash) location.hash = next.hash;
+                            } catch (e) {}
+                        }
+                        showPushOpenDialog(d.title, d.body);
+                    }
                 });
             }
             if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
@@ -1619,7 +1628,7 @@
 
         function assignmentRowLabel(row) {
             const name = instrumentUiName(relationName(row.instruments), relationIsSection(row.instruments)) || 'Όργανο';
-            const showPart = Boolean(row.part_position) && instrumentPeerCount(row.instrument_id) > 1;
+            const showPart = Boolean(row.part_position) && (isPrivilegedRole() ? instrumentPeerCount(row.instrument_id) > 1 : true);
             let label = showPart ? `${name} ${row.part_position}` : name;
             if (row.concert_set) label += ` · ${row.concert_set}`;
             return label;
@@ -1953,7 +1962,7 @@
 
             const [{ data: announcements, error: announcementsError }, { data: events, error: eventsError }] = await Promise.all([
                 supabaseClient.from('announcement_log').select('id, title, body, created_at').order('created_at', { ascending: false }).limit(3),
-                supabaseClient.from('band_events').select('id, event_name, event_type, date, time, location').gte('date', new Date().toISOString().split('T')[0]).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
+                supabaseClient.from('band_events').select('id, event_name, event_type, date, time, location').gte('date', athensNowParts().date).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
             ]);
             sortEventsChronologically(events);
 
@@ -1964,7 +1973,7 @@
 
             const firstName = currentProfile?.first_name || currentProfile?.name || 'μουσικέ';
             const vocativeFirstName = getGreekVocativeName(firstName);
-            const nextEvent = (events || []).find(ev => !isRehearsalEvent(ev));
+            const nextEvent = (events || []).find(ev => !isRehearsalEvent(ev) && !eventHasEnded(ev));
             let html = `
                 <div class="flex items-center justify-between mb-5">
                     <div>
@@ -3778,7 +3787,7 @@
             } else {
                 html += `<p class="text-xs text-slate-400 mb-4">Το προσωπικό σας ιστορικό συμμετοχών και αιτιολογιών απουσίας.</p>`;
 
-                const userEmail = currentUser?.email || currentProfile?.email;
+                const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
                 const { data: myResponses, error: myResponsesError } = await supabaseClient.from('event_responses').select('*').eq('user_email', userEmail);
                 if (myResponsesError) {
                     console.error('Αδυναμία φόρτωσης προσωπικών απαντήσεων:', myResponsesError);
@@ -4327,6 +4336,7 @@
                         .delete()
                         .eq('endpoint', subJSON.endpoint);
                     if (delErr) console.warn('DB delete warning:', delErr);
+                    try { await existing.unsubscribe(); } catch (e) {}
                 }
                 showAppToast('Οι ειδοποιήσεις απενεργοποιήθηκαν.', 'notify-off');
                 renderProfileTab();
