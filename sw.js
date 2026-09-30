@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'thiva-philharmonic-v86';
+const CACHE_VERSION = 'thiva-philharmonic-v87';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PUSH_OPEN_CACHE = 'thiva-philharmonic-push-open';
 
@@ -150,7 +150,15 @@ self.addEventListener('notificationclick', (event) => {
             self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
                 const existing = clients.find((c) => 'focus' in c);
                 if (existing) {
-                    return existing.focus().then(() => existing.navigate(url)).then(() => notifyClientsPushOpen(title, body));
+                    const focused = existing.focus();
+                    const opened = typeof existing.navigate === 'function'
+                        ? focused.then(() => existing.navigate(url))
+                        : focused.then(() => {
+                            try {
+                                existing.postMessage({ type: 'thiva-push-open', title, body, url });
+                            } catch (e) {}
+                        });
+                    return opened.then(() => notifyClientsPushOpen(title, body));
                 }
                 if (self.clients.openWindow) return self.clients.openWindow(url);
             })
