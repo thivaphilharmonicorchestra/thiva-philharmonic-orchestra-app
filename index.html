@@ -628,6 +628,32 @@
             dialog.querySelector('#app-steps-ok').onclick = () => dialog.remove();
         }
 
+        const PUSH_OPEN_CACHE = 'thiva-philharmonic-push-open';
+        let lastPushOpenKey = '';
+        function showPushOpenDialog(title, body) {
+            const t = String(title || '').trim();
+            const b = String(body || '').trim();
+            if (!t && !b) return;
+            const key = `${t}\n${b}`;
+            if (key === lastPushOpenKey) return;
+            lastPushOpenKey = key;
+            setTimeout(() => { lastPushOpenKey = ''; }, 5000);
+            showAppStepsDialog(t && b ? `${t}\n\n${b}` : (t || b));
+        }
+
+        async function consumeStashedPushOpen() {
+            if (!currentUser || requirePasswordSetup) return;
+            if (!('caches' in window)) return;
+            try {
+                const cache = await caches.open(PUSH_OPEN_CACHE);
+                const res = await cache.match('last');
+                if (!res) return;
+                await cache.delete('last');
+                const payload = await res.json();
+                showPushOpenDialog(payload.title, payload.body);
+            } catch (e) {}
+        }
+
         function confirmAppAction(message) {
             return new Promise((resolve) => {
                 document.getElementById('app-confirm')?.remove();
@@ -1095,9 +1121,7 @@
             lockIosOverscroll();
             registerServiceWorker();
             initPushSupport();
-            if (window.location.hash === '#notifications') activeTab = 'notifications';
-            if (window.location.hash === '#events') activeTab = 'events';
-            if (window.location.hash === '#attendance') activeTab = 'attendance';
+            applyLocationHash();
 
             const cbInfo = authCallbackParams();
             if (isPasswordSetupCallback(cbInfo)) {
@@ -1352,6 +1376,12 @@
         }
 
         async function initPushSupport() {
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.addEventListener('message', (event) => {
+                    const d = event.data;
+                    if (d && d.type === 'thiva-push-open') showPushOpenDialog(d.title, d.body);
+                });
+            }
             if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
             try {
                 const reg = await readyPushRegistration();
@@ -1833,6 +1863,19 @@
             renderApp();
         }
 
+        function applyLocationHash() {
+            const h = window.location.hash;
+            if (h === '#notifications') activeTab = 'notifications';
+            else if (h === '#events') activeTab = 'events';
+            else if (h === '#attendance') activeTab = 'attendance';
+        }
+
+        window.addEventListener('hashchange', () => {
+            if (!currentUser || requirePasswordSetup) return;
+            applyLocationHash();
+            renderApp();
+        });
+
         async function renderApp() {
             if (blockUnofficialApp()) return;
             setAuthNarrow(false);
@@ -1862,6 +1905,7 @@
             else if (activeTab === 'notifications') runTabLoad(renderNotificationsTab);
             syncInstallNudge();
             maybeOfferPushPrompt();
+            consumeStashedPushOpen();
         }
 
         async function renderHomeTab() {
@@ -3426,6 +3470,9 @@
                     } else {
                         goingBtnClass += "bg-emerald-600 hover:bg-emerald-500 text-white";
                         notGoingBtnClass += "bg-red-600 hover:bg-red-500 text-white";
+                        if (!eventHasEnded(ev)) {
+                            statusLabel = '<span class="text-amber-300 font-medium">Δεν έχετε δηλώσει ακόμα.</span>';
+                        }
                     }
                     const lockNote = rsvpLocked
                         ? (isRehearsalEvent(ev)
