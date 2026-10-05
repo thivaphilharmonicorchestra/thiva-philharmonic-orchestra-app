@@ -1998,6 +1998,7 @@
             syncInstallNudge();
             maybeOfferPushPrompt();
             consumeStashedPushOpen();
+            healPushSubscription();
         }
 
         async function renderHomeTab() {
@@ -4308,6 +4309,39 @@
             }
         }
 
+        let pushHealDone = false;
+        async function savePushSubscriptionRow(sub) {
+            const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
+            const subJSON = sub.toJSON();
+            return supabaseClient
+                .from('push_subscriptions')
+                .upsert({
+                    user_email: userEmail,
+                    user_id: currentUser?.id || null,
+                    endpoint: subJSON.endpoint,
+                    p256dh_key: subJSON.keys?.p256dh || '',
+                    auth_secret: subJSON.keys?.auth || '',
+                    user_agent: navigator.userAgent
+                }, { onConflict: 'endpoint' });
+        }
+
+        async function healPushSubscription() {
+            if (pushHealDone || !currentUser || requirePasswordSetup) return;
+            if (localStorage.getItem(PUSH_OPT_KEY) === '0') return;
+            if (!('Notification' in window) || Notification.permission !== 'granted') return;
+            try {
+                const reg = await readyPushRegistration();
+                const sub = await reg?.pushManager.getSubscription();
+                if (!sub) return;
+                pushHealDone = true;
+                pushSubscription = sub;
+                const { error } = await savePushSubscriptionRow(sub);
+                if (error) console.warn('Push heal failed:', error);
+            } catch (e) {
+                console.warn('Push heal failed:', e);
+            }
+        }
+
         async function enablePushNotifications() {
             const blocked = pushSubscribeBlockedReason();
             if (blocked) {
@@ -4339,20 +4373,7 @@
 
                 pushSubscription = await subscribeToPushService(reg, appKey);
                 localStorage.setItem(PUSH_OPT_KEY, '1');
-
-                const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
-                const subJSON = pushSubscription.toJSON();
-                const { error: saveErr } = await supabaseClient
-                    .from('push_subscriptions')
-                    .upsert({
-                        user_email: userEmail,
-                        user_id: currentUser?.id || null,
-                        endpoint: subJSON.endpoint,
-                        p256dh_key: subJSON.keys?.p256dh || '',
-                        auth_secret: subJSON.keys?.auth  || '',
-                        user_agent: navigator.userAgent
-                    }, { onConflict: 'endpoint' });
-
+                const { error: saveErr } = await savePushSubscriptionRow(pushSubscription);
                 if (saveErr) throw saveErr;
 
                 try { localStorage.setItem(PUSH_PROMPT_SKIP_KEY, '1'); } catch {}
