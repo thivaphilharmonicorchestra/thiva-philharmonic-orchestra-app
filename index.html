@@ -420,6 +420,7 @@
         ];
         const OFFICIAL_APP_ORIGIN = 'https://thivaphilharmonicorchestra.github.io/thiva-philharmonic-orchestra-app/';
         const INTERNAL_DOCS_BUCKET = 'internal-docs';
+        const SIGNED_PDF_TTL_SEC = 3600;
         const APP_ADMIN_CONTACT_EMAIL = 'vassilisrizos@gmail.com';
         const AUTH_IDB_NAME = 'thiva-philharmonic-auth';
         const PUSH_OPT_KEY = 'thiva-push-opt-in';
@@ -439,6 +440,137 @@
                 };
                 req.onsuccess = () => resolve(req.result);
                 req.onerror = () => reject(req.error);
+            });
+        }
+
+        const SCORES_IDB_NAME = 'thiva-philharmonic-scores';
+        let scorePrefetchGen = 0;
+        let offlinePdfPieceIds = new Set();
+        let offlinePdfLinks = {};
+
+        function openScoresIdb() {
+            return new Promise((resolve, reject) => {
+                if (!window.indexedDB) {
+                    reject(new Error('no indexedDB'));
+                    return;
+                }
+                const req = indexedDB.open(SCORES_IDB_NAME, 1);
+                req.onupgradeneeded = () => {
+                    const db = req.result;
+                    if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
+                    if (!db.objectStoreNames.contains('pdfs')) db.createObjectStore('pdfs');
+                };
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        function scoresIdbRequest(storeName, mode, fn) {
+            return openScoresIdb().then((db) => new Promise((resolve, reject) => {
+                const tx = db.transaction(storeName, mode);
+                const req = fn(tx.objectStore(storeName));
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            }));
+        }
+
+        function scoresPdfKey(userId, pieceId) {
+            return `${userId}::${pieceId}`;
+        }
+
+        function samePdfPath(a, b) {
+            const norm = (p) => {
+                try { return decodeURIComponent(String(p || '')); } catch { return String(p || ''); }
+            };
+            return norm(a) === norm(b);
+        }
+
+        async function scoresGetMeta(userId) {
+            if (!userId) return null;
+            try {
+                return (await scoresIdbRequest('meta', 'readonly', (store) => store.get(userId))) || null;
+            } catch {
+                return null;
+            }
+        }
+
+        async function scoresPutMeta(userId, patch) {
+            if (!userId) return;
+            try {
+                const prev = (await scoresGetMeta(userId)) || {};
+                const next = { ...prev, ...patch, userId, savedAt: Date.now() };
+                await scoresIdbRequest('meta', 'readwrite', (store) => store.put(next, userId));
+            } catch (e) {
+                console.warn('scores meta save failed', e);
+            }
+        }
+
+        async function scoresGetPdf(userId, pieceId) {
+            if (!userId || pieceId == null || pieceId === '') return null;
+            try {
+                const row = await scoresIdbRequest('pdfs', 'readonly', (store) => store.get(scoresPdfKey(userId, pieceId)));
+                if (!row || row.userId !== userId || !row.bytes) return null;
+                return row;
+            } catch {
+                return null;
+            }
+        }
+
+        async function scoresPutPdf(userId, pieceId, pdfLink, bytes) {
+            if (!userId || pieceId == null || !bytes) return;
+            const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+            await scoresIdbRequest('pdfs', 'readwrite', (store) => store.put({
+                userId,
+                pieceId: Number(pieceId) || pieceId,
+                pdfLink,
+                bytes: buffer,
+                savedAt: Date.now()
+            }, scoresPdfKey(userId, pieceId)));
+            const cached = { ...((await scoresGetMeta(userId))?.cached || {}) };
+            cached[String(pieceId)] = pdfLink;
+            await scoresPutMeta(userId, { cached });
+            offlinePdfPieceIds.add(Number(pieceId) || pieceId);
+            offlinePdfLinks[String(pieceId)] = pdfLink;
+        }
+
+        async function refreshOfflinePdfFlags() {
+            offlinePdfPieceIds = new Set();
+            offlinePdfLinks = {};
+            const snap = await scoresGetMeta(currentUser?.id);
+            const cached = snap?.cached || {};
+            Object.keys(cached).forEach((id) => {
+                offlinePdfPieceIds.add(Number(id));
+                offlinePdfLinks[id] = cached[id];
+            });
+        }
+
+        function pieceIsOnDevice(item) {
+            if (!item?.id || !item.pdf_link) return false;
+            if (!offlinePdfPieceIds.has(Number(item.id))) return false;
+            const stored = offlinePdfLinks[String(item.id)];
+            return !stored || samePdfPath(stored, item.pdf_link);
+        }
+
+        async function restoreOfflineSessionSnapshot() {
+            if (!currentUser?.id) return false;
+            const snap = await scoresGetMeta(currentUser.id);
+            if (!snap?.profile) return false;
+            currentProfile = snap.profile;
+            assignmentDirectory = Array.isArray(snap.assignmentDirectory)
+                ? snap.assignmentDirectory
+                : (currentProfile.assignments || []);
+            if (Array.isArray(snap.library) && snap.library.length && !musicLibraryCache.length) {
+                musicLibraryCache = snap.library;
+            }
+            return true;
+        }
+
+        async function persistOfflineSessionSnapshot(extra = {}) {
+            if (!currentUser?.id || !currentProfile) return;
+            await scoresPutMeta(currentUser.id, {
+                profile: currentProfile,
+                assignmentDirectory: currentProfile.assignments || assignmentDirectory || [],
+                ...extra
             });
         }
 
@@ -544,6 +676,10 @@
             const sleptMs = appHiddenAt ? Date.now() - appHiddenAt : 0;
             const fromBfcache = !!(event && event.type === 'pageshow' && event.persisted);
             if ((fromBfcache || sleptMs >= BACKGROUND_RELOAD_MS) && !isPdfViewerOpen() && !requirePasswordSetup) {
+                if (navigator.onLine === false) {
+                    appHiddenAt = 0;
+                    return;
+                }
                 window.location.reload();
                 return;
             }
@@ -1203,8 +1339,13 @@
                     await fetchProfile();
                     renderApp();
                 } else if (event !== 'INITIAL_SESSION' || authReady) {
+                    scorePrefetchGen += 1;
                     currentUser = null;
                     currentProfile = null;
+                    musicLibraryCache = [];
+                    offlinePdfPieceIds = new Set();
+                    offlinePdfLinks = {};
+                    musicTabShellReady = false;
                     renderLogin();
                 }
             });
@@ -1487,7 +1628,11 @@
 
         async function fetchProfile() {
             if (!currentUser) return;
-            
+            if (navigator.onLine === false) {
+                await restoreOfflineSessionSnapshot();
+                return;
+            }
+            try {
             let { data } = await supabaseClient
                 .from('profiles')
                 .select('*')
@@ -1563,6 +1708,11 @@
                     : assignments;
             } else {
                 currentProfile.assignments = [];
+            }
+            await persistOfflineSessionSnapshot();
+            } catch (e) {
+                console.warn('fetchProfile', e);
+                await restoreOfflineSessionSnapshot();
             }
         }
 
@@ -2140,28 +2290,51 @@
                 content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Παρτιτούρες</h2><p class="text-slate-400 text-sm">Φόρτωση βιβλιοθήκης...</p>`;
             }
 
-            let musicQuery = await supabaseClient
-                .from('music_library')
-                .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id, instruments(name))');
-            if (musicQuery.error) {
-                musicQuery = await supabaseClient
+            let music = null;
+            let loadError = null;
+            let fromOfflineCache = false;
+
+            if (navigator.onLine !== false) {
+                let musicQuery = await supabaseClient
                     .from('music_library')
-                    .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id)');
+                    .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id, instruments(name))');
+                if (musicQuery.error) {
+                    musicQuery = await supabaseClient
+                        .from('music_library')
+                        .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id)');
+                }
+                if (musicQuery.error) loadError = musicQuery.error;
+                else music = musicQuery.data;
             }
 
-            if (musicQuery.error) {
+            if (!music) {
+                const snap = await scoresGetMeta(currentUser?.id);
+                if (Array.isArray(snap?.library) && snap.library.length) {
+                    music = snap.library;
+                    fromOfflineCache = true;
+                }
+            }
+
+            if (!music) {
                 musicTabShellReady = false;
-                content.innerHTML = `<p class="text-red-400 text-sm">Σφάλμα φόρτωσης: ${escapeHtml(musicQuery.error.message)}</p>`;
+                content.innerHTML = `<p class="text-red-400 text-sm">Σφάλμα φόρτωσης: ${escapeHtml(loadError?.message || 'Δεν υπάρχουν αποθηκευμένες παρτιτούρες σε αυτό το τηλέφωνο.')}</p>`;
                 return;
             }
-            const music = musicQuery.data;
 
             musicLibraryCache = music || [];
+            if (!fromOfflineCache && currentUser?.id && musicLibraryCache.length) {
+                await persistOfflineSessionSnapshot({ library: musicLibraryCache });
+            }
+            await refreshOfflinePdfFlags();
             if (!keepShell) {
-                await buildMusicTabShell(content, musicLibraryCache);
+                await buildMusicTabShell(content, musicLibraryCache, { fromOfflineCache });
                 musicTabShellReady = true;
+            } else {
+                const banner = document.getElementById('music-offline-banner');
+                if (banner) banner.classList.toggle('hidden', !fromOfflineCache);
             }
             paintMusicResults();
+            prefetchEntitledPdfs(musicLibraryCache);
         }
 
         function filteredMusicRows() {
@@ -2196,7 +2369,7 @@
             return { displayed, allSets, partNames, poolCount: pool.length };
         }
 
-        async function buildMusicTabShell(content, music) {
+        async function buildMusicTabShell(content, music, options = {}) {
             const labels = assignmentLabels();
             const instrumentLine = isConductorRole()
                 ? 'Μαέστρος'
@@ -2212,6 +2385,7 @@
                         <p class="text-xs text-indigo-300">${escapeHtml(instrumentLine)}</p>
                     </div>
                 </div>
+                <p id="music-offline-banner" class="${options.fromOfflineCache ? '' : 'hidden '}text-[11px] text-amber-200/90 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2 mb-3">Χωρίς σύνδεση — ανοίγουν όσες παρτιτούρες έχουν ήδη αποθηκευτεί σε αυτό το τηλέφωνο.</p>
                 <div class="bg-slate-800 p-3 rounded-xl border border-slate-700 mb-3 space-y-2">
                     <div class="relative">
                         <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">${uiIcon('magnifying-glass', 'h-4 w-4')}</span>
@@ -2239,7 +2413,7 @@
                 <div id="music-results"></div>
             `;
 
-            if (isAdminRole()) {
+            if (isAdminRole() && navigator.onLine !== false) {
                 const { data: instruments } = await supabaseClient
                     .from('instruments')
                     .select('id, name, max_regular_parts, sort_order, is_section, is_percussion')
@@ -2312,7 +2486,11 @@
             const count = document.getElementById('music-count');
             if (!results) return;
             const { displayed, poolCount } = filteredMusicRows();
-            if (count) count.textContent = `${displayed.length} από ${poolCount} παρτιτούρες`;
+            const savedCount = displayed.filter(pieceIsOnDevice).length;
+            if (count) {
+                count.textContent = `${displayed.length} από ${poolCount} παρτιτούρες`
+                    + (savedCount ? ` · ${savedCount} στο τηλέφωνο` : '');
+            }
 
             if (!displayed.length) {
                 const emptyMessage = musicLibraryCache.length === 0
@@ -2331,10 +2509,11 @@
                         <div class="min-w-0">
                             <h3 class="font-bold text-base text-white truncate">${escapeHtml(item.piece_title)}</h3>
                             <p class="text-xs text-slate-400 truncate">${escapeHtml(item.composer || 'Άγνωστος Συνθέτης')} • ${escapeHtml(musicPartLabel(item))}</p>
+                            ${pieceIsOnDevice(item) ? '<p class="text-[10px] text-emerald-400/90 mt-0.5">Διαθέσιμο χωρίς σύνδεση</p>' : ''}
                         </div>
                         <div class="flex space-x-1.5 shrink-0 ml-2">
                             ${filePath ? `
-                            <button type="button" onclick="shareSheetPdf('${encodeURIComponent(filePath)}', '${encodeURIComponent(item.piece_title || 'partitura')}')" class="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100" aria-label="Κοινοποίηση παρτιτούρας" title="Κοινοποίηση">
+                            <button type="button" onclick="shareSheetPdf('${encodeURIComponent(filePath)}', '${encodeURIComponent(item.piece_title || 'partitura')}', ${Number(item.id)})" class="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100" aria-label="Κοινοποίηση παρτιτούρας" title="Κοινοποίηση">
                                 <svg aria-hidden="true" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.5"></circle><circle cx="6" cy="12" r="2.5"></circle><circle cx="18" cy="19" r="2.5"></circle><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6"></path></svg>
                             </button>
                             <button type="button" onclick="openSecurePdf('${encodeURIComponent(filePath)}', ${Number(item.id)})" class="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white" aria-label="Άνοιγμα παρτιτούρας" title="Άνοιγμα">
@@ -2435,18 +2614,124 @@
             }
         }
 
-        async function openSecurePdf(filePath, pieceId) {
-            filePath = decodeURIComponent(filePath);
-            const { data, error } = await supabaseClient.storage
-                .from('sheet-music')
-                .createSignedUrl(filePath, 60);
+        function signedPdfErrorMessage(error) {
+            const raw = String(error?.message || error || '');
+            const lower = raw.toLowerCase();
+            if (lower.includes('object not found') || lower.includes('not found') || lower.includes('404')) {
+                return 'Το αρχείο δεν ήταν διαθέσιμο αυτή τη στιγμή. Δοκιμάστε ξανά. Αν το σήμα είναι αδύναμο, πλησιάστε στο Wi-Fi της αίθουσας.';
+            }
+            if (lower.includes('offline-missing')) {
+                return 'Αυτή η παρτιτούρα δεν έχει αποθηκευτεί ακόμα σε αυτό το τηλέφωνο. Ανοίξτε την όταν έχετε σύνδεση.';
+            }
+            if (lower.includes('failed to fetch') || lower.includes('network') || lower.includes('abort') || lower.includes('timeout')) {
+                return 'Αδύναμη σύνδεση. Δοκιμάστε ξανά όταν το σήμα είναι καλύτερο.';
+            }
+            return raw || 'Άγνωστο σφάλμα';
+        }
 
-            if (error || !data?.signedUrl) {
-                showAppNotice('Σφάλμα πρόσβασης στο αρχείο: ' + (error?.message || 'Άγνωστο σφάλμα'));
-                return;
+        async function fetchPdfBytesFromSignedUrl(signedUrl) {
+            const res = await fetch(signedUrl);
+            if (!res.ok) {
+                const body = await res.text().catch(() => '');
+                if (res.status === 404 || /object not found/i.test(body)) {
+                    throw new Error('Object not found');
+                }
+                throw new Error(`Αδυναμία λήψης του PDF (${res.status}).`);
+            }
+            return new Uint8Array(await res.arrayBuffer());
+        }
+
+        async function loadSignedPdfBytes(bucket, path, { retries = 1 } = {}) {
+            const objectPath = decodeURIComponent(path);
+            let lastError;
+            for (let attempt = 0; attempt <= retries; attempt++) {
+                try {
+                    const { data, error } = await supabaseClient.storage
+                        .from(bucket)
+                        .createSignedUrl(objectPath, SIGNED_PDF_TTL_SEC);
+                    if (error || !data?.signedUrl) {
+                        throw error || new Error('Άγνωστο σφάλμα');
+                    }
+                    return await fetchPdfBytesFromSignedUrl(data.signedUrl);
+                } catch (e) {
+                    lastError = e;
+                    if (attempt < retries) {
+                        await new Promise((resolve) => setTimeout(resolve, 700 * (attempt + 1)));
+                    }
+                }
+            }
+            throw lastError;
+        }
+
+        async function bytesForSheetPdf(filePath, pieceId) {
+            const path = decodeURIComponent(filePath);
+            const userId = currentUser?.id;
+            const cached = userId ? await scoresGetPdf(userId, pieceId) : null;
+            const cacheHit = cached && samePdfPath(cached.pdfLink, path)
+                ? new Uint8Array(cached.bytes.slice(0))
+                : null;
+
+            if (cacheHit) {
+                if (navigator.onLine !== false && userId) {
+                    loadSignedPdfBytes('sheet-music', path, { retries: 0 })
+                        .then((fresh) => {
+                            if (currentUser?.id !== userId) return;
+                            return scoresPutPdf(userId, pieceId, path, fresh);
+                        })
+                        .then(() => {
+                            if (document.getElementById('music-results')) paintMusicResults();
+                        })
+                        .catch(() => {});
+                }
+                return cacheHit;
             }
 
-            openPdfViewer(data.signedUrl, pieceId);
+            if (navigator.onLine === false) {
+                throw new Error('offline-missing');
+            }
+
+            const bytes = await loadSignedPdfBytes('sheet-music', path);
+            if (userId && pieceId != null) {
+                try {
+                    await scoresPutPdf(userId, pieceId, path, bytes);
+                    if (document.getElementById('music-results')) paintMusicResults();
+                } catch (e) {
+                    console.warn('score cache save failed', e);
+                }
+            }
+            return bytes;
+        }
+
+        async function prefetchEntitledPdfs(music) {
+            if (!currentUser?.id || isPrivilegedRole() || !Array.isArray(music) || navigator.onLine === false) return;
+            const gen = ++scorePrefetchGen;
+            const userId = currentUser.id;
+            let painted = 0;
+            for (const item of music) {
+                if (gen !== scorePrefetchGen || currentUser?.id !== userId) return;
+                if (!item?.pdf_link || item.id == null) continue;
+                const existing = await scoresGetPdf(userId, item.id);
+                if (existing && samePdfPath(existing.pdfLink, item.pdf_link)) continue;
+                try {
+                    const bytes = await loadSignedPdfBytes('sheet-music', item.pdf_link, { retries: 0 });
+                    await scoresPutPdf(userId, item.id, decodeURIComponent(item.pdf_link), bytes);
+                    painted += 1;
+                    if (painted % 4 === 0 && document.getElementById('music-results')) paintMusicResults();
+                } catch (e) {
+                    if (e && (e.name === 'QuotaExceededError' || e.code === 22)) return;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 120));
+            }
+            if (painted && document.getElementById('music-results')) paintMusicResults();
+        }
+
+        async function openSecurePdf(filePath, pieceId) {
+            try {
+                const bytes = await bytesForSheetPdf(filePath, pieceId);
+                await openPdfViewer(bytes, pieceId);
+            } catch (error) {
+                showAppNotice('Σφάλμα πρόσβασης στο αρχείο: ' + signedPdfErrorMessage(error));
+            }
         }
 
         function safePdfFileName(title) {
@@ -2454,18 +2739,9 @@
             return `${base.slice(0, 80)}.pdf`;
         }
 
-        async function fetchSignedPdfFile(filePath, title) {
-            const path = decodeURIComponent(filePath);
-            const { data, error } = await supabaseClient.storage
-                .from('sheet-music')
-                .createSignedUrl(path, 60);
-            if (error || !data?.signedUrl) {
-                throw new Error(error?.message || 'Άγνωστο σφάλμα');
-            }
-            const res = await fetch(data.signedUrl);
-            if (!res.ok) throw new Error('Αδυναμία λήψης του PDF.');
-            const blob = await res.blob();
-            const original = new File([blob], safePdfFileName(title), { type: 'application/pdf' });
+        async function fetchSignedPdfFile(filePath, title, pieceId) {
+            const bytes = await bytesForSheetPdf(filePath, pieceId);
+            const original = new File([bytes], safePdfFileName(title), { type: 'application/pdf' });
             return stampSharedPdfFile(original);
         }
 
@@ -2516,10 +2792,10 @@
             return new File([stamped], file.name, { type: 'application/pdf' });
         }
 
-        async function shareSheetPdf(filePath, encodedTitle) {
+        async function shareSheetPdf(filePath, encodedTitle, pieceId) {
             const title = decodeURIComponent(encodedTitle || 'partitura');
             try {
-                const file = await fetchSignedPdfFile(filePath, title);
+                const file = await fetchSignedPdfFile(filePath, title, pieceId);
                 if (navigator.share && navigator.canShare?.({ files: [file] })) {
                     await navigator.share({ files: [file], title, text: title });
                     return;
@@ -2639,14 +2915,16 @@
             requestPdfWakeLock();
 
             try {
-                const loadingTask = pdfjsLib.getDocument(pdfUrl);
+                const loadingTask = pdfjsLib.getDocument(
+                    pdfUrl instanceof Uint8Array ? { data: pdfUrl } : pdfUrl
+                );
                 pdfDoc = await loadingTask.promise;
                 await renderPage(pageNum);
                 if (!pdfReadOnly) await loadSavedAnnotations();
                 setPdfLoadingCover(false);
                 requestAnimationFrame(() => schedulePdfRefit());
             } catch (error) {
-                showAppNotice('Σφάλμα φόρτωσης PDF: ' + error.message);
+                showAppNotice('Σφάλμα φόρτωσης PDF: ' + signedPdfErrorMessage(error));
                 closePdfViewer();
             }
         }
@@ -2704,14 +2982,12 @@
                 showAppNotice('Σφάλμα πρόσβασης στον κανονισμό: ' + (latest.error?.message || 'Το αρχείο δεν βρέθηκε.'));
                 return;
             }
-            const { data, error } = await supabaseClient.storage
-                .from(INTERNAL_DOCS_BUCKET)
-                .createSignedUrl(latest.path, 60);
-            if (error || !data?.signedUrl) {
-                showAppNotice('Σφάλμα πρόσβασης στον κανονισμό: ' + (error?.message || 'Το αρχείο δεν βρέθηκε.'));
-                return;
+            try {
+                const bytes = await loadSignedPdfBytes(INTERNAL_DOCS_BUCKET, latest.path);
+                return openPdfViewer(bytes, 'internal-regulations', { readOnly: true });
+            } catch (error) {
+                showAppNotice('Σφάλμα πρόσβασης στον κανονισμό: ' + signedPdfErrorMessage(error));
             }
-            return openPdfViewer(data.signedUrl, 'internal-regulations', { readOnly: true });
         }
 
         async function uploadInternalRegulations(event) {
