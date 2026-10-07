@@ -520,6 +520,9 @@
         const SCORES_IDB_NAME = 'thiva-philharmonic-scores';
         let scorePrefetchGen = 0;
         let scorePrefetchInFlight = null;
+        let scorePrefetchFailedIds = new Set();
+        let scorePrefetchQuotaAt = 0;
+        const PDF_FETCH_MS = 90000;
         let scoresMetaWriteChain = Promise.resolve();
         let offlinePdfPieceIds = new Set();
         let offlinePdfLinks = {};
@@ -1523,6 +1526,8 @@
                     }
                     scorePrefetchGen += 1;
                     scorePrefetchInFlight = null;
+                    scorePrefetchFailedIds = new Set();
+                    scorePrefetchQuotaAt = 0;
                     currentUser = null;
                     currentProfile = null;
                     musicLibraryCache = [];
@@ -2813,6 +2818,18 @@
                 el.textContent = `${saved} από ${total} έτοιμες χωρίς σύνδεση`;
                 return;
             }
+            const leftover = total - saved;
+            const leftoverFailed = leftover && leftover === musicPdfPool().filter((item) => !pieceIsOnDevice(item) && scorePrefetchFailedIds.has(Number(item.id))).length;
+            if (scorePrefetchQuotaAt && leftover) {
+                el.className = 'text-[11px] text-amber-200/90 pt-1';
+                el.textContent = `${saved} έτοιμες χωρίς σύνδεση. Η συσκευή δεν έχει άλλο χώρο για τις υπόλοιπες ${leftover}.`;
+                return;
+            }
+            if (!scorePrefetchInFlight && leftoverFailed) {
+                el.className = 'text-[11px] text-amber-200/90 pt-1';
+                el.textContent = `${saved} έτοιμες χωρίς σύνδεση · ${leftover} δεν κατέβηκαν. Ανοίξτε τις με σύνδεση.`;
+                return;
+            }
             el.className = 'text-[11px] text-indigo-300 pt-1';
             el.textContent = `Αποθηκεύονται ${saved} από ${total} στη συσκευή…`;
         }
@@ -2962,19 +2979,34 @@
             return raw || 'Άγνωστο σφάλμα';
         }
 
-        async function fetchPdfBytesFromSignedUrl(signedUrl) {
-            const res = await fetch(signedUrl);
-            if (!res.ok) {
-                const body = await res.text().catch(() => '');
-                if (res.status === 404 || /object not found/i.test(body)) {
-                    throw new Error('Object not found');
-                }
-                throw new Error(`Αδυναμία λήψης του PDF (${res.status}).`);
-            }
-            return new Uint8Array(await res.arrayBuffer());
+        function isQuotaError(error) {
+            return Boolean(error && (error.name === 'QuotaExceededError' || error.code === 22 || error.code === 1014));
         }
 
-        async function loadSignedPdfBytes(bucket, path, { retries = 1 } = {}) {
+        async function fetchPdfBytesFromSignedUrl(signedUrl, timeoutMs = PDF_FETCH_MS) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const res = await fetch(signedUrl, { signal: controller.signal });
+                if (!res.ok) {
+                    const body = await res.text().catch(() => '');
+                    if (res.status === 404 || /object not found/i.test(body)) {
+                        throw new Error('Object not found');
+                    }
+                    throw new Error(`Αδυναμία λήψης του PDF (${res.status}).`);
+                }
+                return new Uint8Array(await res.arrayBuffer());
+            } catch (error) {
+                if (error?.name === 'AbortError') {
+                    throw new Error('timeout');
+                }
+                throw error;
+            } finally {
+                clearTimeout(timer);
+            }
+        }
+
+        async function loadSignedPdfBytes(bucket, path, { retries = 1, timeoutMs = PDF_FETCH_MS } = {}) {
             const objectPath = decodeURIComponent(path);
             let lastError;
             for (let attempt = 0; attempt <= retries; attempt++) {
@@ -2985,9 +3017,10 @@
                     if (error || !data?.signedUrl) {
                         throw error || new Error('Άγνωστο σφάλμα');
                     }
-                    return await fetchPdfBytesFromSignedUrl(data.signedUrl);
+                    return await fetchPdfBytesFromSignedUrl(data.signedUrl, timeoutMs);
                 } catch (e) {
                     lastError = e;
+                    if (isQuotaError(e)) throw e;
                     if (attempt < retries) {
                         await new Promise((resolve) => setTimeout(resolve, 700 * (attempt + 1)));
                     }
@@ -3042,6 +3075,10 @@
 
         async function prefetchEntitledPdfs(music) {
             if (!currentUser?.id || !Array.isArray(music) || navigator.onLine === false) return;
+            if (scorePrefetchQuotaAt && Date.now() - scorePrefetchQuotaAt < 10 * 60 * 1000) {
+                updateMusicSyncStatus();
+                return;
+            }
             if (scorePrefetchInFlight) return scorePrefetchInFlight;
             const userId = currentUser.id;
             const queue = music.slice().sort((a, b) => Number(isFullScoreItem(a)) - Number(isFullScoreItem(b)));
@@ -3049,26 +3086,44 @@
             const run = (async () => {
                 let painted = 0;
                 updateMusicSyncStatus();
-                for (const item of queue) {
-                    if (gen !== scorePrefetchGen || currentUser?.id !== userId) return;
-                    if (!item?.pdf_link || item.id == null) continue;
+                const trySave = async (item, retries) => {
+                    if (gen !== scorePrefetchGen || currentUser?.id !== userId) return 'abort';
+                    if (!item?.pdf_link || item.id == null) return 'skip';
                     const existing = await scoresGetPdf(userId, item.id);
-                    if (existing && samePdfPath(existing.pdfLink, item.pdf_link)) continue;
+                    if (existing && samePdfPath(existing.pdfLink, item.pdf_link)) {
+                        scorePrefetchFailedIds.delete(Number(item.id));
+                        return 'skip';
+                    }
                     try {
-                        const bytes = await loadSignedPdfBytes('sheet-music', item.pdf_link, { retries: 0 });
+                        const bytes = await loadSignedPdfBytes('sheet-music', item.pdf_link, { retries });
                         let path = item.pdf_link;
                         try { path = decodeURIComponent(item.pdf_link); } catch {}
                         await scoresPutPdf(userId, item.id, path, bytes);
+                        scorePrefetchFailedIds.delete(Number(item.id));
                         painted += 1;
                         updateMusicSyncStatus();
                         if (painted % 3 === 0 && document.getElementById('music-results')) paintMusicResults();
+                        return 'ok';
                     } catch (e) {
-                        if (e && (e.name === 'QuotaExceededError' || e.code === 22)) {
+                        if (isQuotaError(e)) {
+                            scorePrefetchQuotaAt = Date.now();
                             updateMusicSyncStatus();
-                            return;
+                            return 'quota';
                         }
+                        scorePrefetchFailedIds.add(Number(item.id));
+                        return 'fail';
                     }
+                };
+                for (const item of queue) {
+                    const result = await trySave(item, 0);
+                    if (result === 'abort' || result === 'quota') return;
                     await new Promise((resolve) => setTimeout(resolve, 80));
+                }
+                const missing = queue.filter((item) => item?.id != null && scorePrefetchFailedIds.has(Number(item.id)));
+                for (const item of missing) {
+                    const result = await trySave(item, 1);
+                    if (result === 'abort' || result === 'quota') return;
+                    await new Promise((resolve) => setTimeout(resolve, 200));
                 }
                 if (document.getElementById('music-results')) paintMusicResults();
                 else updateMusicSyncStatus();
@@ -3076,6 +3131,7 @@
             scorePrefetchInFlight = run;
             run.finally(() => {
                 if (scorePrefetchInFlight === run) scorePrefetchInFlight = null;
+                updateMusicSyncStatus();
             });
             return run;
         }
