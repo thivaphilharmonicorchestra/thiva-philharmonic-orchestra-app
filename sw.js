@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'thiva-philharmonic-v93';
+const CACHE_VERSION = 'thiva-philharmonic-v94';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PUSH_OPEN_CACHE = 'thiva-philharmonic-push-open';
 
@@ -65,6 +65,18 @@ function safeNotificationUrl(raw) {
     }
 }
 
+function isNavigationRequest(req) {
+    return req.mode === 'navigate' || (req.destination === 'document');
+}
+
+function isCachedShellRequest(url) {
+    if (url.origin === location.origin) return true;
+    return STATIC_ASSETS.some((asset) => {
+        if (!asset.startsWith('http')) return false;
+        return url.href === asset || url.href.startsWith(`${asset}?`);
+    });
+}
+
 self.addEventListener('fetch', (event) => {
     const req = event.request;
     const url = new URL(req.url);
@@ -75,17 +87,40 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    if (url.origin === location.origin || STATIC_ASSETS.includes(url.href) || STATIC_ASSETS.includes(url.pathname)) {
-        event.respondWith(
-            fetch(req).then((resp) => {
+    if (isNavigationRequest(req)) {
+        event.respondWith((async () => {
+            try {
+                const resp = await fetch(req);
                 if (resp.ok) {
-                    caches.open(STATIC_CACHE).then(c => c.put(req, resp.clone())).catch(() => {});
+                    const cache = await caches.open(STATIC_CACHE);
+                    cache.put('./index.html', resp.clone()).catch(() => {});
                 }
                 return resp;
-            }).catch(() => caches.match(req).then(cached => cached || caches.match('./index.html')))
-        );
+            } catch {
+                return (await caches.match('./index.html'))
+                    || (await caches.match('./'))
+                    || Response.error();
+            }
+        })());
         return;
     }
+
+    if (!isCachedShellRequest(url) && !STATIC_ASSETS.includes(url.pathname)) return;
+
+    event.respondWith((async () => {
+        const cached = await caches.match(req, { ignoreSearch: true });
+        if (cached) return cached;
+        try {
+            const resp = await fetch(req);
+            if (resp.ok) {
+                const cache = await caches.open(STATIC_CACHE);
+                cache.put(req, resp.clone()).catch(() => {});
+            }
+            return resp;
+        } catch {
+            return new Response('', { status: 504, statusText: 'Offline' });
+        }
+    })());
 });
 
 self.addEventListener('push', (event) => {
