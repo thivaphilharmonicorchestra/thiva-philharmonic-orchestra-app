@@ -837,6 +837,7 @@
             }
             appHiddenAt = 0;
             try { supabaseClient.auth.startAutoRefresh(); } catch {}
+            checkServiceWorkerUpdate();
         }
 
         async function runTabLoad(loader) {
@@ -1572,13 +1573,57 @@
             }
         }
 
+        function askServiceWorkerToActivate(reg) {
+            if (!reg) return;
+            if (reg.waiting) {
+                try { reg.waiting.postMessage({ type: 'SKIP_WAITING' }); } catch {}
+            }
+            const installing = reg.installing;
+            if (installing) {
+                installing.addEventListener('statechange', () => {
+                    if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+                        try { installing.postMessage({ type: 'SKIP_WAITING' }); } catch {}
+                    }
+                });
+            }
+        }
+
+        function bindServiceWorkerUpdates() {
+            if (bindServiceWorkerUpdates.done || !('serviceWorker' in navigator)) return;
+            bindServiceWorkerUpdates.done = true;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                try {
+                    if (sessionStorage.getItem('thiva-sw-reloaded') === '1') return;
+                    sessionStorage.setItem('thiva-sw-reloaded', '1');
+                } catch {}
+                window.location.reload();
+            });
+        }
+
+        function checkServiceWorkerUpdate() {
+            if (!('serviceWorker' in navigator) || navigator.onLine === false) return;
+            navigator.serviceWorker.getRegistration('./').then((reg) => {
+                if (!reg) return;
+                askServiceWorkerToActivate(reg);
+                return reg.update();
+            }).catch(() => {});
+        }
+
         function registerServiceWorker() {
             if (!('serviceWorker' in navigator)) return Promise.resolve(null);
-            if (serviceWorkerRegistration) return serviceWorkerRegistration;
+            bindServiceWorkerUpdates();
+            if (serviceWorkerRegistration) {
+                serviceWorkerRegistration.then((reg) => {
+                    askServiceWorkerToActivate(reg);
+                    if (reg && navigator.onLine !== false) reg.update().catch(() => {});
+                });
+                return serviceWorkerRegistration;
+            }
 
-            serviceWorkerRegistration = navigator.serviceWorker.register('./sw.js')
+            serviceWorkerRegistration = navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
                 .then(reg => {
-                    console.log('Service Worker registered:', reg.scope);
+                    askServiceWorkerToActivate(reg);
+                    if (navigator.onLine !== false) reg.update().catch(() => {});
                     return reg;
                 })
                 .catch(err => {
