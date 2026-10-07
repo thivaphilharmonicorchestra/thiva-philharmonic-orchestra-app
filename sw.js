@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'thiva-philharmonic-v94';
+const CACHE_VERSION = 'thiva-philharmonic-v95';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PUSH_OPEN_CACHE = 'thiva-philharmonic-push-open';
 
@@ -9,12 +9,12 @@ const STATIC_ASSETS = [
     './thiva_app_icon_android.png',
     './thiva_home_button.png',
     './manifest.webmanifest',
-    'https://cdn.tailwindcss.com',
-    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4',
-    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
-    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
-    'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js',
-    'https://raw.githubusercontent.com/thivaphilharmonic-maker/thiva-philharmonic-orchestra-app/main/logo.png'
+    './vendor/tailwind.js',
+    './vendor/supabase.min.js',
+    './vendor/pdf.min.js',
+    './vendor/pdf.worker.min.js',
+    './vendor/pdf-lib.min.js',
+    './vendor/NoSleep.min.js'
 ];
 
 self.addEventListener('install', (event) => {
@@ -71,10 +71,7 @@ function isNavigationRequest(req) {
 
 function isCachedShellRequest(url) {
     if (url.origin === location.origin) return true;
-    return STATIC_ASSETS.some((asset) => {
-        if (!asset.startsWith('http')) return false;
-        return url.href === asset || url.href.startsWith(`${asset}?`);
-    });
+    return false;
 }
 
 self.addEventListener('fetch', (event) => {
@@ -89,23 +86,27 @@ self.addEventListener('fetch', (event) => {
 
     if (isNavigationRequest(req)) {
         event.respondWith((async () => {
-            try {
-                const resp = await fetch(req);
+            const cached = (await caches.match('./index.html')) || (await caches.match('./'));
+            const network = fetch(req).then((resp) => {
                 if (resp.ok) {
-                    const cache = await caches.open(STATIC_CACHE);
-                    cache.put('./index.html', resp.clone()).catch(() => {});
+                    caches.open(STATIC_CACHE).then((c) => c.put('./index.html', resp.clone())).catch(() => {});
                 }
                 return resp;
+            });
+            if (cached) {
+                network.catch(() => {});
+                return cached;
+            }
+            try {
+                return await network;
             } catch {
-                return (await caches.match('./index.html'))
-                    || (await caches.match('./'))
-                    || Response.error();
+                return Response.error();
             }
         })());
         return;
     }
 
-    if (!isCachedShellRequest(url) && !STATIC_ASSETS.includes(url.pathname)) return;
+    if (!isCachedShellRequest(url)) return;
 
     event.respondWith((async () => {
         const cached = await caches.match(req, { ignoreSearch: true });
