@@ -648,6 +648,23 @@
             });
         }
 
+        function staleSnapshotBanner() {
+            return '<p class="text-[11px] text-amber-200/90 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2 mb-3">Χωρίς σύνδεση — εμφανίζονται τα τελευταία αποθηκευμένα στοιχεία σε αυτή τη συσκευή.</p>';
+        }
+
+        async function readTabSnapshot(key) {
+            const snap = await scoresGetMeta(currentUser?.id);
+            return snap?.tabs?.[key] || null;
+        }
+
+        async function writeTabSnapshot(key, payload) {
+            if (!currentUser?.id || payload == null) return;
+            const snap = await scoresGetMeta(currentUser.id) || {};
+            await persistOfflineSessionSnapshot({
+                tabs: { ...(snap.tabs || {}), [key]: payload }
+            });
+        }
+
         function isAuthStorageKey(key) {
             return !!key && (key.includes('auth-token') || key.startsWith('sb-'));
         }
@@ -2331,21 +2348,43 @@
             const content = document.getElementById('content');
             content.innerHTML = '<h2 class="text-2xl font-bold mb-4">Αρχική</h2><p class="text-slate-400 text-sm">Φόρτωση...</p>';
 
-            const [{ data: announcements, error: announcementsError }, { data: events, error: eventsError }] = await Promise.all([
-                supabaseClient.from('announcement_log').select('id, title, body, created_at').order('created_at', { ascending: false }).limit(3),
-                supabaseClient.from('band_events').select('id, event_name, event_type, date, time, location').gte('date', athensNowParts().date).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
-            ]);
-            sortEventsChronologically(events);
-
-            if (announcementsError || eventsError) {
-                content.innerHTML = `<p class="text-red-400 text-sm">Σφάλμα φόρτωσης αρχικής σελίδας: ${escapeHtml((announcementsError || eventsError).message)}</p>`;
+            let announcements = null;
+            let events = null;
+            let stale = false;
+            if (navigator.onLine !== false) {
+                try {
+                    const [{ data: liveAnnouncements, error: announcementsError }, { data: liveEvents, error: eventsError }] = await Promise.all([
+                        supabaseClient.from('announcement_log').select('id, title, body, created_at').order('created_at', { ascending: false }).limit(3),
+                        supabaseClient.from('band_events').select('id, event_name, event_type, date, time, location').gte('date', athensNowParts().date).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
+                    ]);
+                    if (!announcementsError && !eventsError) {
+                        announcements = liveAnnouncements || [];
+                        events = liveEvents || [];
+                        await writeTabSnapshot('home', { announcements, events });
+                    }
+                } catch (e) {
+                    console.warn('renderHomeTab', e);
+                }
+            }
+            if (!events) {
+                const cached = await readTabSnapshot('home');
+                if (cached) {
+                    announcements = cached.announcements || [];
+                    events = cached.events || [];
+                    stale = true;
+                }
+            }
+            if (!events) {
+                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Αρχική</h2><p class="text-slate-400 text-sm">Δεν υπάρχουν αποθηκευμένα στοιχεία σε αυτή τη συσκευή. Συνδεθείτε στο διαδίκτυο μία φορά για να εμφανιστεί η αρχική.</p>`;
                 return;
             }
+            sortEventsChronologically(events);
 
             const firstName = currentProfile?.first_name || currentProfile?.name || 'μουσικέ';
             const vocativeFirstName = getGreekVocativeName(firstName);
             const nextEvent = (events || []).find(ev => !isRehearsalEvent(ev) && !eventHasEnded(ev));
-            let html = `
+            let html = stale ? staleSnapshotBanner() : '';
+            html += `
                 <div class="flex items-center justify-between mb-5">
                     <div>
                         <p class="text-sm text-slate-400">Καλώς ήρθες,</p>
@@ -2394,17 +2433,35 @@
             const content = document.getElementById('content');
             content.innerHTML = '<h2 class="text-2xl font-bold mb-4">Ανακοινώσεις</h2><p class="text-slate-400 text-sm">Φόρτωση ανακοινώσεων...</p>';
 
-            const { data: announcements, error } = await supabaseClient
-                .from('announcement_log')
-                .select('id, title, body, sent_by_email, created_at')
-                .order('created_at', { ascending: false });
-
-            if (error) {
-                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Ανακοινώσεις</h2><p class="text-red-400 text-sm">Σφάλμα φόρτωσης ανακοινώσεων: ${escapeHtml(error.message)}</p>`;
+            let announcements = null;
+            let stale = false;
+            if (navigator.onLine !== false) {
+                try {
+                    const { data, error } = await supabaseClient
+                        .from('announcement_log')
+                        .select('id, title, body, sent_by_email, created_at')
+                        .order('created_at', { ascending: false });
+                    if (!error) {
+                        announcements = data || [];
+                        await writeTabSnapshot('notifications', { announcements });
+                    }
+                } catch (e) {
+                    console.warn('renderNotificationsTab', e);
+                }
+            }
+            if (!announcements) {
+                const cached = await readTabSnapshot('notifications');
+                if (cached?.announcements) {
+                    announcements = cached.announcements;
+                    stale = true;
+                }
+            }
+            if (!announcements) {
+                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Ανακοινώσεις</h2><p class="text-slate-400 text-sm">Δεν υπάρχουν αποθηκευμένες ανακοινώσεις σε αυτή τη συσκευή.</p>`;
                 return;
             }
 
-            let html = `
+            let html = (stale ? staleSnapshotBanner() : '') + `
                 <div class="flex items-center justify-between mb-4">
                     <h2 class="text-2xl font-bold">Ανακοινώσεις</h2>
                 </div>
@@ -2493,7 +2550,7 @@
 
             if (!music) {
                 musicTabShellReady = false;
-                content.innerHTML = `<p class="text-red-400 text-sm">Σφάλμα φόρτωσης: ${escapeHtml(loadError?.message || 'Δεν υπάρχουν αποθηκευμένες παρτιτούρες σε αυτή τη συσκευή.')}</p>`;
+                content.innerHTML = `<p class="text-slate-400 text-sm">Δεν υπάρχουν αποθηκευμένες παρτιτούρες σε αυτή τη συσκευή.</p>`;
                 return;
             }
 
@@ -2561,7 +2618,7 @@
                         <p class="text-xs text-indigo-300">${escapeHtml(instrumentLine)}</p>
                     </div>
                 </div>
-                <p id="music-offline-banner" class="${options.fromOfflineCache ? '' : 'hidden '}text-[11px] text-amber-200/90 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2 mb-3">Χωρίς σύνδεση — ανοίγουν όσες παρτιτούρες έχουν ήδη αποθηκευτεί σε αυτό το τηλέφωνο.</p>
+                <p id="music-offline-banner" class="${options.fromOfflineCache ? '' : 'hidden '}text-[11px] text-amber-200/90 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2 mb-3">Χωρίς σύνδεση — ανοίγουν μόνο όσες παρτιτούρες έχουν ήδη αποθηκευτεί σε αυτή τη συσκευή.</p>
                 <div class="bg-slate-800 p-3 rounded-xl border border-slate-700 mb-3 space-y-2">
                     <div class="relative">
                         <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">${uiIcon('magnifying-glass', 'h-4 w-4')}</span>
@@ -2585,6 +2642,7 @@
                         </select>
                     </div>
                     <div id="music-count" class="text-[10px] text-slate-500 pt-0.5"></div>
+                    <div id="music-sync-status" class="text-[11px] text-indigo-300 pt-1"></div>
                 </div>
                 <div id="music-results"></div>
             `;
@@ -2657,16 +2715,42 @@
             refreshAdminPartOptions();
         }
 
+        function musicPdfPool() {
+            return (musicLibraryCache || []).filter((item) => item?.pdf_link && item.id != null);
+        }
+
+        function updateMusicSyncStatus() {
+            const el = document.getElementById('music-sync-status');
+            if (!el) return;
+            const total = musicPdfPool().length;
+            const saved = musicPdfPool().filter(pieceIsOnDevice).length;
+            if (!total) {
+                el.textContent = '';
+                return;
+            }
+            if (saved >= total) {
+                el.className = 'text-[11px] text-emerald-400/90 pt-1';
+                el.textContent = total === 1
+                    ? '1 παρτιτούρα έτοιμη χωρίς σύνδεση'
+                    : `${total} παρτιτούρες έτοιμες χωρίς σύνδεση`;
+                return;
+            }
+            if (navigator.onLine === false) {
+                el.className = 'text-[11px] text-amber-200/90 pt-1';
+                el.textContent = `${saved} από ${total} έτοιμες χωρίς σύνδεση`;
+                return;
+            }
+            el.className = 'text-[11px] text-indigo-300 pt-1';
+            el.textContent = `Αποθηκεύονται ${saved} από ${total} στη συσκευή…`;
+        }
+
         function paintMusicResults() {
             const results = document.getElementById('music-results');
             const count = document.getElementById('music-count');
             if (!results) return;
             const { displayed, poolCount } = filteredMusicRows();
-            const savedCount = displayed.filter(pieceIsOnDevice).length;
-            if (count) {
-                count.textContent = `${displayed.length} από ${poolCount} παρτιτούρες`
-                    + (savedCount ? ` · ${savedCount} στο τηλέφωνο` : '');
-            }
+            if (count) count.textContent = `${displayed.length} από ${poolCount} παρτιτούρες`;
+            updateMusicSyncStatus();
 
             if (!displayed.length) {
                 const emptyMessage = musicLibraryCache.length === 0
@@ -2685,9 +2769,9 @@
                         <div class="min-w-0">
                             <h3 class="font-bold text-base text-white truncate">${escapeHtml(item.piece_title)}</h3>
                             <p class="text-xs text-slate-400 truncate">${escapeHtml(item.composer || 'Άγνωστος Συνθέτης')} • ${escapeHtml(musicPartLabel(item))}</p>
-                            ${pieceIsOnDevice(item) ? '<p class="text-[10px] text-emerald-400/90 mt-0.5">Διαθέσιμο χωρίς σύνδεση</p>' : ''}
                         </div>
-                        <div class="flex space-x-1.5 shrink-0 ml-2">
+                        <div class="flex items-center space-x-1.5 shrink-0 ml-2">
+                            ${pieceIsOnDevice(item) ? `<span class="text-emerald-400" title="Έτοιμη χωρίς σύνδεση" aria-label="Έτοιμη χωρίς σύνδεση">${uiIcon('check-circle', 'h-4 w-4')}</span>` : ''}
                             ${filePath ? `
                             <button type="button" onclick="shareSheetPdf('${encodeURIComponent(filePath)}', '${encodeURIComponent(item.piece_title || 'partitura')}', ${Number(item.id)})" class="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100" aria-label="Κοινοποίηση παρτιτούρας" title="Κοινοποίηση">
                                 <svg aria-hidden="true" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.5"></circle><circle cx="6" cy="12" r="2.5"></circle><circle cx="18" cy="19" r="2.5"></circle><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6"></path></svg>
@@ -2797,7 +2881,7 @@
                 return 'Το αρχείο δεν ήταν διαθέσιμο αυτή τη στιγμή. Δοκιμάστε ξανά. Αν το σήμα είναι αδύναμο, πλησιάστε στο Wi-Fi της αίθουσας.';
             }
             if (lower.includes('offline-missing')) {
-                return 'Αυτή η παρτιτούρα δεν έχει αποθηκευτεί ακόμα σε αυτό το τηλέφωνο. Ανοίξτε την όταν έχετε σύνδεση.';
+                return 'Αυτή η παρτιτούρα δεν έχει αποθηκευτεί ακόμα σε αυτή τη συσκευή. Ανοίξτε την όταν έχετε σύνδεση.';
             }
             if (lower.includes('failed to fetch') || lower.includes('network') || lower.includes('abort') || lower.includes('timeout')) {
                 return 'Αδύναμη σύνδεση. Δοκιμάστε ξανά όταν το σήμα είναι καλύτερο.';
@@ -2882,8 +2966,9 @@
             if (!currentUser?.id || !Array.isArray(music) || navigator.onLine === false) return;
             const gen = ++scorePrefetchGen;
             const userId = currentUser.id;
-            const queue = isPrivilegedRole() ? music.slice(0, 40) : music;
+            const queue = music;
             let painted = 0;
+            updateMusicSyncStatus();
             for (const item of queue) {
                 if (gen !== scorePrefetchGen || currentUser?.id !== userId) return;
                 if (!item?.pdf_link || item.id == null) continue;
@@ -2893,13 +2978,18 @@
                     const bytes = await loadSignedPdfBytes('sheet-music', item.pdf_link, { retries: 0 });
                     await scoresPutPdf(userId, item.id, decodeURIComponent(item.pdf_link), bytes);
                     painted += 1;
-                    if (painted % 4 === 0 && document.getElementById('music-results')) paintMusicResults();
+                    updateMusicSyncStatus();
+                    if (painted % 3 === 0 && document.getElementById('music-results')) paintMusicResults();
                 } catch (e) {
-                    if (e && (e.name === 'QuotaExceededError' || e.code === 22)) return;
+                    if (e && (e.name === 'QuotaExceededError' || e.code === 22)) {
+                        updateMusicSyncStatus();
+                        return;
+                    }
                 }
-                await new Promise((resolve) => setTimeout(resolve, 120));
+                await new Promise((resolve) => setTimeout(resolve, 80));
             }
-            if (painted && document.getElementById('music-results')) paintMusicResults();
+            if (document.getElementById('music-results')) paintMusicResults();
+            else updateMusicSyncStatus();
         }
 
         async function openSecurePdf(filePath, pieceId) {
@@ -3980,22 +4070,40 @@
                 content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Πρόγραμμα</h2><p class="text-slate-400 text-sm">Φόρτωση προγράμματος...</p>`;
             }
 
-            const { data: events, error: eventError } = await supabaseClient.from('band_events').select('*').order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true });
-            
-            if (eventError) {
-                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Πρόγραμμα</h2><p class="text-red-400 text-sm">Σφάλμα φόρτωσης εκδηλώσεων: ${escapeHtml(eventError.message)}</p>`;
+            let events = null;
+            let responses = [];
+            let stale = false;
+            const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
+            if (navigator.onLine !== false) {
+                try {
+                    const { data: liveEvents, error: eventError } = await supabaseClient.from('band_events').select('*').order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true });
+                    if (!eventError) {
+                        events = liveEvents || [];
+                        const { data: liveResponses, error: responsesError } = await supabaseClient.from('event_responses').select('*').eq('user_email', userEmail);
+                        if (responsesError) console.error('Αδυναμία φόρτωσης απαντήσεων εκδηλώσεων:', responsesError);
+                        responses = liveResponses || [];
+                        await writeTabSnapshot('events', { events, responses });
+                    }
+                } catch (e) {
+                    console.warn('renderEventsTab', e);
+                }
+            }
+            if (!events) {
+                const cached = await readTabSnapshot('events');
+                if (cached?.events) {
+                    events = cached.events;
+                    responses = cached.responses || [];
+                    stale = true;
+                }
+            }
+            if (!events) {
+                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Πρόγραμμα</h2><p class="text-slate-400 text-sm">Δεν υπάρχει αποθηκευμένο πρόγραμμα σε αυτή τη συσκευή.</p>`;
                 return;
             }
             sortEventsChronologically(events);
-
-            const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
-            const { data: responses, error: responsesError } = await supabaseClient.from('event_responses').select('*').eq('user_email', userEmail);
-            if (responsesError) {
-                console.error('Αδυναμία φόρτωσης απαντήσεων εκδηλώσεων:', responsesError);
-            }
             eventsTabCache = { events: events || [], responses: responses || [] };
 
-            let html = `
+            let html = (stale ? staleSnapshotBanner() : '') + `
                 <div class="flex justify-between items-center mb-4">
                     <div class="flex items-center space-x-2">
                         <h2 class="text-2xl font-bold">Πρόγραμμα</h2>
@@ -4127,17 +4235,54 @@
             const content = document.getElementById('content');
             content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Παρουσίες</h2><p class="text-slate-400 text-sm">Φόρτωση αναφοράς...</p>`;
 
-            const { data: events, error: eventError } = await supabaseClient.from('band_events').select('*').order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true });
-            
-            if (eventError) {
-                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Παρουσίες</h2><p class="text-red-400 text-sm">Σφάλμα φόρτωσης δεδομένων.</p>`;
+            const isAdmin = isPrivilegedRole();
+            let events = null;
+            let profiles = [];
+            let allAttendance = [];
+            let myResponses = [];
+            let stale = false;
+
+            if (navigator.onLine !== false) {
+                try {
+                    const { data: liveEvents, error: eventError } = await supabaseClient.from('band_events').select('*').order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true });
+                    if (!eventError) {
+                        events = liveEvents || [];
+                        if (isAdmin) {
+                            const loaded = await loadProfilesWithAssignments();
+                            profiles = loaded.profiles || [];
+                            const { data: liveAtt } = await supabaseClient
+                                .from('event_responses')
+                                .select('status, excuse, user_email, event_id, actual_attendance');
+                            allAttendance = liveAtt || [];
+                            await writeTabSnapshot('attendance', { mode: 'staff', events, profiles, allAttendance });
+                        } else {
+                            const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
+                            const { data: liveMine } = await supabaseClient.from('event_responses').select('*').eq('user_email', userEmail);
+                            myResponses = liveMine || [];
+                            await writeTabSnapshot('attendance', { mode: 'self', events, myResponses });
+                        }
+                    }
+                } catch (e) {
+                    console.warn('renderAttendanceTab', e);
+                }
+            }
+            if (!events) {
+                const cached = await readTabSnapshot('attendance');
+                if (cached?.events) {
+                    events = cached.events;
+                    profiles = cached.profiles || [];
+                    allAttendance = cached.allAttendance || [];
+                    myResponses = cached.myResponses || [];
+                    stale = true;
+                }
+            }
+            if (!events) {
+                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Παρουσίες</h2><p class="text-slate-400 text-sm">Δεν υπάρχουν αποθηκευμένες παρουσίες σε αυτή τη συσκευή.</p>`;
                 return;
             }
             sortEventsChronologically(events);
 
-            const isAdmin = isPrivilegedRole();
-
-            let html = `
+            let html = (stale ? staleSnapshotBanner() : '') + `
                 <div class="flex items-center justify-between mb-1">
                     <h2 class="text-2xl font-bold">Παρουσίες</h2>
                 </div>
@@ -4180,22 +4325,12 @@
                 if (!events || events.length === 0) {
                     html += `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">Δεν υπάρχουν εκδηλώσεις.</div>`;
                 } else {
-                    const { profiles, error: profilesError } = await loadProfilesWithAssignments();
-                    if (profilesError) {
-                        console.error('Αδυναμία φόρτωσης προφίλ για τις παρουσίες:', profilesError);
-                    }
                     const profilesByEmail = new Map(
                         (profiles || []).map(profile => [
                             String(profile.email || '').trim().toLowerCase(),
                             profile
                         ])
                     );
-                    const { data: allAttendance, error: allAttError } = await supabaseClient
-                        .from('event_responses')
-                        .select('status, excuse, user_email, event_id, actual_attendance');
-                    if (allAttError) {
-                        html += `<div class="bg-red-900/40 border border-red-700/60 text-red-200 p-3 rounded-xl text-xs mb-3">Σφάλμα φόρτωσης παρουσιών: ${escapeHtml(allAttError.message || 'Άγνωστο σφάλμα')}</div>`;
-                    }
                     const responsesByEvent = new Map();
                     (allAttendance || []).forEach(row => {
                         if (!responsesByEvent.has(row.event_id)) responsesByEvent.set(row.event_id, []);
@@ -4324,12 +4459,6 @@
             } else {
                 html += `<p class="text-xs text-slate-400 mb-4">Το προσωπικό σας ιστορικό συμμετοχών και αιτιολογιών απουσίας.</p>`;
 
-                const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
-                const { data: myResponses, error: myResponsesError } = await supabaseClient.from('event_responses').select('*').eq('user_email', userEmail);
-                if (myResponsesError) {
-                    console.error('Αδυναμία φόρτωσης προσωπικών απαντήσεων:', myResponsesError);
-                }
-                
                 const responseByEvent = new Map((myResponses || []).map(r => [r.event_id, r]));
                 let attendedCount = 0;
                 let absentCount = 0;
@@ -4394,7 +4523,7 @@
 
             content.innerHTML = html;
 
-            if (isAdmin) {
+            if (isAdmin && !stale) {
                 setTimeout(loadSubscriberCount, 10);
             }
         }
