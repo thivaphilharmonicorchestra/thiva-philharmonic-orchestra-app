@@ -64,10 +64,78 @@
             -webkit-user-select: none;
             user-select: none;
             -webkit-touch-callout: none;
+            background: #0f172a;
+            color: #e2e8f0;
         }
         body {
             min-height: 100%;
             min-height: 100dvh;
+            margin: 0;
+        }
+        #navbar.hidden,
+        #install-nudge.hidden {
+            display: none !important;
+        }
+        #navbar:not(.hidden) {
+            display: flex !important;
+        }
+        #nav-home img {
+            width: 5rem;
+            height: 5rem;
+            object-fit: contain;
+        }
+        #pdf-viewer-container {
+            display: none !important;
+        }
+        html.pdf-open #pdf-viewer-container {
+            display: flex !important;
+            flex-direction: column;
+        }
+        #need-network {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 24px;
+            background: #0f172a;
+            color: #e2e8f0;
+            box-sizing: border-box;
+        }
+        #need-network.is-on {
+            display: flex;
+        }
+        #need-network img {
+            width: 96px;
+            height: 96px;
+            object-fit: contain;
+            margin-bottom: 16px;
+        }
+        #need-network h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #a5b4fc;
+            margin: 0 0 12px;
+        }
+        #need-network p {
+            font-size: 0.95rem;
+            line-height: 1.45;
+            color: #cbd5e1;
+            max-width: 20rem;
+            margin: 0;
+        }
+        #need-network button {
+            margin-top: 20px;
+            background: #4f46e5;
+            color: #fff;
+            border: 0;
+            border-radius: 12px;
+            padding: 12px 22px;
+            font-size: 0.9rem;
+            font-weight: 600;
         }
         input, textarea, select {
             -webkit-user-select: text;
@@ -346,6 +414,13 @@
     </style>
 </head>
 <body class="bg-slate-900 text-slate-100 h-full overflow-hidden flex flex-col">
+
+    <div id="need-network" class="is-on" role="alert">
+        <img src="./thiva_app_icon.png" alt="">
+        <h1>Φιλαρμονική Ορχήστρα Θήβας</h1>
+        <p id="need-network-msg">Φόρτωση...</p>
+        <button type="button" id="need-network-retry" hidden onclick="window.location.reload()">Δοκιμή ξανά</button>
+    </div>
 
     <!-- APP CONTAINER -->
     <div id="app" class="max-w-md mx-auto w-full flex-1 flex flex-col justify-between p-4">
@@ -635,6 +710,9 @@
         };
 
         function fetchWithTimeout(input, init = {}) {
+            if (navigator.onLine === false) {
+                return Promise.reject(new TypeError('Failed to fetch'));
+            }
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), 20000);
             const userSignal = init.signal;
@@ -646,25 +724,41 @@
             return fetch(input, { ...rest, signal: controller.signal }).finally(() => clearTimeout(timer));
         }
 
-        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-            auth: {
-                detectSessionInUrl: true,
-                persistSession: true,
-                autoRefreshToken: true,
-                storage: authStorage,
-                flowType: 'pkce',
-                lock: async (_name, _acquireTimeout, fn) => fn()
-            },
-            global: {
-                fetch: fetchWithTimeout
-            }
-        });
+        const supabaseClient = window.supabase
+            ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+                auth: {
+                    detectSessionInUrl: true,
+                    persistSession: true,
+                    autoRefreshToken: true,
+                    storage: authStorage,
+                    flowType: 'pkce',
+                    lock: async (_name, _acquireTimeout, fn) => fn()
+                },
+                global: {
+                    fetch: fetchWithTimeout
+                }
+            })
+            : null;
 
         let appHiddenAt = 0;
         let tabLoadGen = 0;
         let requirePasswordSetup = false;
         const BACKGROUND_RELOAD_MS = 30000;
         const TAB_LOAD_RELOAD_MS = 25000;
+        const NEED_NETWORK_COPY = 'Χρειάζεται σύνδεση στο διαδίκτυο για να ανοίξει η εφαρμογή.';
+
+        function setNeedNetworkScreen(on, message) {
+            const el = document.getElementById('need-network');
+            const msg = document.getElementById('need-network-msg');
+            const retry = document.getElementById('need-network-retry');
+            if (msg && message) msg.textContent = message;
+            if (el) el.classList.toggle('is-on', !!on);
+            if (retry) retry.hidden = !on || !message || message === 'Φόρτωση...';
+        }
+
+        function hideNeedNetworkScreen() {
+            setNeedNetworkScreen(false);
+        }
 
         function isPdfViewerOpen() {
             const el = document.getElementById('pdf-viewer-container');
@@ -1147,7 +1241,13 @@
         });
         window.addEventListener('pageshow', (event) => resumeAppAfterBackground(event));
         window.addEventListener('focus', () => resumeAppAfterBackground());
-        window.addEventListener('online', () => resumeAppAfterBackground());
+        window.addEventListener('online', () => {
+            if (document.getElementById('need-network')?.classList.contains('is-on')) {
+                window.location.reload();
+                return;
+            }
+            resumeAppAfterBackground();
+        });
         document.addEventListener('touchstart', () => {
             if (appHiddenAt) resumeAppAfterBackground();
         }, { passive: true });
@@ -1280,6 +1380,14 @@
         }
 
         async function init() {
+            if (!supabaseClient) {
+                setNeedNetworkScreen(true, NEED_NETWORK_COPY);
+                return;
+            }
+            if (navigator.onLine === false) {
+                try { supabaseClient.auth.stopAutoRefresh(); } catch {}
+            }
+            try {
             await restoreAuthStorage();
             syncTabletShell();
             lockIosOverscroll();
@@ -1301,6 +1409,7 @@
                         <p class="text-emerald-400">${uiIconText('check-circle', 'Θα είμαι εκεί')}</p>
                         <p class="text-red-400">${uiIconText('x-circle', 'Δεν μπορώ')}</p>
                     </div>`;
+                hideNeedNetworkScreen();
                 return;
             }
 
@@ -1312,7 +1421,9 @@
             }
 
             let authReady = false;
-            const { session, type, error } = await completeAuthFromUrl();
+            const { session, type, error } = navigator.onLine === false
+                ? await supabaseClient.auth.getSession().then(({ data }) => ({ session: data?.session || null, type: '', error: null })).catch(() => ({ session: null, type: '', error: null }))
+                : await completeAuthFromUrl();
             authReady = true;
 
             supabaseClient.auth.onAuthStateChange(async (event, nextSession) => {
@@ -1338,6 +1449,7 @@
                     if (event === 'TOKEN_REFRESHED') return;
                     await fetchProfile();
                     renderApp();
+                    hideNeedNetworkScreen();
                 } else if (event !== 'INITIAL_SESSION' || authReady) {
                     scorePrefetchGen += 1;
                     currentUser = null;
@@ -1347,28 +1459,46 @@
                     offlinePdfLinks = {};
                     musicTabShellReady = false;
                     renderLogin();
+                    hideNeedNetworkScreen();
                 }
             });
 
-            if (blockUnofficialApp()) return;
+            if (blockUnofficialApp()) {
+                hideNeedNetworkScreen();
+                return;
+            }
 
             if (session) {
                 currentUser = session.user;
                 if (requirePasswordSetup) {
                     renderSetPasswordScreen();
+                    hideNeedNetworkScreen();
                     return;
                 }
                 await fetchProfile();
+                if (navigator.onLine === false) activeTab = 'music';
                 renderApp();
+                hideNeedNetworkScreen();
+                return;
+            }
+
+            if (navigator.onLine === false) {
+                setNeedNetworkScreen(true, NEED_NETWORK_COPY);
                 return;
             }
 
             if (error) {
                 renderLogin(error);
+                hideNeedNetworkScreen();
                 return;
             }
 
             renderLogin();
+            hideNeedNetworkScreen();
+            } catch (e) {
+                console.warn('init', e);
+                setNeedNetworkScreen(true, NEED_NETWORK_COPY);
+            }
         }
 
         function registerServiceWorker() {
