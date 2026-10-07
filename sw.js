@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'thiva-philharmonic-v99';
+const CACHE_VERSION = 'thiva-philharmonic-v100';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PUSH_OPEN_CACHE = 'thiva-philharmonic-push-open';
 
@@ -87,21 +87,26 @@ self.addEventListener('fetch', (event) => {
     if (isNavigationRequest(req)) {
         event.respondWith((async () => {
             const cached = (await caches.match('./index.html')) || (await caches.match('./'));
-            const network = fetch(req).then((resp) => {
+            const network = fetch(req, { cache: 'no-store' }).then((resp) => {
                 if (resp.ok) {
                     caches.open(STATIC_CACHE).then((c) => c.put('./index.html', resp.clone())).catch(() => {});
                 }
                 return resp;
             });
-            if (cached) {
-                network.catch(() => {});
-                return cached;
+            if (!cached) {
+                try {
+                    return await network;
+                } catch {
+                    return Response.error();
+                }
             }
-            try {
-                return await network;
-            } catch {
-                return Response.error();
-            }
+            const fresh = await Promise.race([
+                network.then((resp) => (resp && resp.ok ? resp : null)).catch(() => null),
+                new Promise((resolve) => setTimeout(() => resolve(null), 3000))
+            ]);
+            if (fresh) return fresh;
+            network.catch(() => {});
+            return cached;
         })());
         return;
     }
@@ -122,6 +127,10 @@ self.addEventListener('fetch', (event) => {
             return new Response('', { status: 504, statusText: 'Offline' });
         }
     })());
+});
+
+self.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('push', (event) => {
