@@ -15,13 +15,12 @@
     <link rel="apple-touch-icon" href="./thiva_app_icon.png">
     <link rel="manifest" href="./manifest.webmanifest">
 
-    <!-- Tailwind CSS for modern mobile-first styling -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Supabase JavaScript Client -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="./vendor/tailwind.js"></script>
+    <script src="./vendor/supabase.min.js"></script>
+    <script src="./vendor/pdf.min.js"></script>
+    <script src="./vendor/NoSleep.min.js"></script>
     <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.js';
     </script>
     <meta name="theme-color" content="#1e293b">
     <style>
@@ -666,6 +665,19 @@
             return dump;
         }
 
+        function readStoredSession() {
+            try {
+                const dump = readAuthLocalStorageDump();
+                for (const value of Object.values(dump)) {
+                    if (!value) continue;
+                    let parsed = typeof value === 'string' ? JSON.parse(value) : value;
+                    if (parsed && parsed.currentSession) parsed = parsed.currentSession;
+                    if (parsed && parsed.access_token && parsed.user) return parsed;
+                }
+            } catch {}
+            return null;
+        }
+
         function persistAuthDump(dump) {
             openAuthIdb().then(db => new Promise((resolve, reject) => {
                 const tx = db.transaction('kv', 'readwrite');
@@ -710,7 +722,10 @@
         };
 
         function fetchWithTimeout(input, init = {}) {
-            if (navigator.onLine === false) {
+            const href = String(typeof input === 'string' ? input : (input && input.url) || '');
+            let host = '';
+            try { host = new URL(href, location.href).hostname; } catch {}
+            if (navigator.onLine === false && host.endsWith('supabase.co')) {
                 return Promise.reject(new TypeError('Failed to fetch'));
             }
             const controller = new AbortController();
@@ -1233,7 +1248,7 @@
         window.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
                 resumeAppAfterBackground();
-                if (isPdfViewerOpen()) requestPdfWakeLock();
+                if (isPdfViewerOpen()) keepAwakeForPdf();
             } else {
                 appHiddenAt = Date.now();
                 try { supabaseClient.auth.stopAutoRefresh(); } catch {}
@@ -1422,7 +1437,7 @@
 
             let authReady = false;
             const { session, type, error } = navigator.onLine === false
-                ? await supabaseClient.auth.getSession().then(({ data }) => ({ session: data?.session || null, type: '', error: null })).catch(() => ({ session: null, type: '', error: null }))
+                ? { session: readStoredSession(), type: '', error: null }
                 : await completeAuthFromUrl();
             authReady = true;
 
@@ -1448,9 +1463,19 @@
                     currentUser = nextSession.user;
                     if (event === 'TOKEN_REFRESHED') return;
                     await fetchProfile();
+                    if (navigator.onLine !== false) warmScoreCache();
                     renderApp();
                     hideNeedNetworkScreen();
                 } else if (event !== 'INITIAL_SESSION' || authReady) {
+                    if (navigator.onLine === false) {
+                        const local = readStoredSession();
+                        if (local?.user) {
+                            currentUser = local.user;
+                            return;
+                        }
+                        setNeedNetworkScreen(true, NEED_NETWORK_COPY);
+                        return;
+                    }
                     scorePrefetchGen += 1;
                     currentUser = null;
                     currentProfile = null;
@@ -1477,6 +1502,7 @@
                 }
                 await fetchProfile();
                 if (navigator.onLine === false) activeTab = 'music';
+                else warmScoreCache();
                 renderApp();
                 hideNeedNetworkScreen();
                 return;
@@ -1843,6 +1869,26 @@
             } catch (e) {
                 console.warn('fetchProfile', e);
                 await restoreOfflineSessionSnapshot();
+            }
+        }
+
+        async function warmScoreCache() {
+            if (!currentUser?.id || navigator.onLine === false) return;
+            try {
+                let musicQuery = await supabaseClient
+                    .from('music_library')
+                    .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id, instruments(name))');
+                if (musicQuery.error) {
+                    musicQuery = await supabaseClient
+                        .from('music_library')
+                        .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id)');
+                }
+                if (musicQuery.error || !Array.isArray(musicQuery.data) || !musicQuery.data.length) return;
+                musicLibraryCache = musicQuery.data;
+                await persistOfflineSessionSnapshot({ library: musicLibraryCache });
+                prefetchEntitledPdfs(musicLibraryCache);
+            } catch (e) {
+                console.warn('warmScoreCache', e);
             }
         }
 
@@ -2447,7 +2493,7 @@
 
             if (!music) {
                 musicTabShellReady = false;
-                content.innerHTML = `<p class="text-red-400 text-sm">Σφάλμα φόρτωσης: ${escapeHtml(loadError?.message || 'Δεν υπάρχουν αποθηκευμένες παρτιτούρες σε αυτό το τηλέφωνο.')}</p>`;
+                content.innerHTML = `<p class="text-red-400 text-sm">Σφάλμα φόρτωσης: ${escapeHtml(loadError?.message || 'Δεν υπάρχουν αποθηκευμένες παρτιτούρες σε αυτή τη συσκευή.')}</p>`;
                 return;
             }
 
@@ -2833,11 +2879,12 @@
         }
 
         async function prefetchEntitledPdfs(music) {
-            if (!currentUser?.id || isPrivilegedRole() || !Array.isArray(music) || navigator.onLine === false) return;
+            if (!currentUser?.id || !Array.isArray(music) || navigator.onLine === false) return;
             const gen = ++scorePrefetchGen;
             const userId = currentUser.id;
+            const queue = isPrivilegedRole() ? music.slice(0, 40) : music;
             let painted = 0;
-            for (const item of music) {
+            for (const item of queue) {
                 if (gen !== scorePrefetchGen || currentUser?.id !== userId) return;
                 if (!item?.pdf_link || item.id == null) continue;
                 const existing = await scoresGetPdf(userId, item.id);
@@ -2856,6 +2903,7 @@
         }
 
         async function openSecurePdf(filePath, pieceId) {
+            keepAwakeForPdf();
             try {
                 const bytes = await bytesForSheetPdf(filePath, pieceId);
                 await openPdfViewer(bytes, pieceId);
@@ -2879,7 +2927,7 @@
             if (window.PDFLib) return window.PDFLib;
             await new Promise((resolve, reject) => {
                 const script = document.createElement('script');
-                script.src = 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js';
+                script.src = './vendor/pdf-lib.min.js';
                 script.onload = resolve;
                 script.onerror = () => reject(new Error('Αδυναμία φόρτωσης εργαλείου υδατογραφήματος.'));
                 document.head.appendChild(script);
@@ -2942,6 +2990,35 @@
             }
         }
 
+        let pdfNoSleep = null;
+
+        function isAppleTouchDevice() {
+            return /iPad|iPhone|iPod/.test(navigator.userAgent)
+                || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        }
+
+        function keepAwakeForPdf() {
+            requestPdfWakeLock();
+            try {
+                if (!window.NoSleep) return;
+                if (!pdfNoSleep) {
+                    if (isAppleTouchDevice() && 'wakeLock' in navigator) {
+                        const lock = navigator.wakeLock;
+                        try {
+                            Object.defineProperty(navigator, 'wakeLock', { configurable: true, get: () => undefined });
+                            pdfNoSleep = new NoSleep();
+                            Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: lock });
+                        } catch {
+                            pdfNoSleep = new NoSleep();
+                        }
+                    } else {
+                        pdfNoSleep = new NoSleep();
+                    }
+                }
+                pdfNoSleep.enable();
+            } catch {}
+        }
+
         async function requestPdfWakeLock() {
             try {
                 if (pdfWakeLock) return;
@@ -2960,6 +3037,7 @@
                 /* ignore */
             }
             pdfWakeLock = null;
+            try { pdfNoSleep?.disable(); } catch {}
         }
 
         function confirmDiscardAnnotations() {
@@ -3016,6 +3094,7 @@
         }
 
         async function openPdfViewer(pdfUrl, pieceId, options = {}) {
+            keepAwakeForPdf();
             if (!viewerHistoryActive) {
                 history.pushState({ ...(history.state || {}), pdfViewer: true }, '');
                 viewerHistoryActive = true;
@@ -3037,12 +3116,17 @@
             setViewportMeta(true);
 
             bindViewerCanvases();
+            if (viewer && !viewer.dataset.awakeBound) {
+                viewer.dataset.awakeBound = '1';
+                viewer.addEventListener('touchstart', keepAwakeForPdf, { passive: true });
+                viewer.addEventListener('pointerdown', keepAwakeForPdf);
+            }
             scoreStage.style.transformOrigin = 'top center';
 
             setupDrawingEvents();
             setupScoreGestures();
             setTool('hand');
-            requestPdfWakeLock();
+            keepAwakeForPdf();
 
             try {
                 const loadingTask = pdfjsLib.getDocument(
@@ -3107,6 +3191,7 @@
         }
 
         async function openInternalRegulations() {
+            keepAwakeForPdf();
             const latest = await getLatestInternalRegulations();
             if (latest.error || !latest.path) {
                 showAppNotice('Σφάλμα πρόσβασης στον κανονισμό: ' + (latest.error?.message || 'Το αρχείο δεν βρέθηκε.'));
