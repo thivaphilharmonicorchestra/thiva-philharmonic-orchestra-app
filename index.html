@@ -89,6 +89,10 @@
         html.pdf-open #pdf-viewer-container {
             display: flex !important;
             flex-direction: column;
+            z-index: 60;
+        }
+        html.pdf-open #navbar {
+            display: none !important;
         }
         #need-network {
             display: none;
@@ -142,6 +146,7 @@
             -webkit-touch-callout: default;
         }
         #app {
+            position: relative;
             height: 100%;
             max-height: 100dvh;
             overflow: hidden;
@@ -178,6 +183,36 @@
         html.pdf-open,
         html.pdf-open body {
             overflow: hidden !important;
+        }
+        #tab-switch-progress {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            z-index: 20;
+            overflow: hidden;
+            pointer-events: none;
+        }
+        #app.tab-loading #tab-switch-progress {
+            display: block;
+        }
+        #app.tab-loading #content {
+            opacity: 0.45;
+            pointer-events: none;
+        }
+        #tab-switch-progress::after {
+            content: '';
+            display: block;
+            height: 100%;
+            width: 32%;
+            background: #818cf8;
+            animation: tab-indeterminate 0.85s ease-in-out infinite;
+        }
+        @keyframes tab-indeterminate {
+            0% { transform: translateX(-120%); }
+            100% { transform: translateX(430%); }
         }
         #pdf-loading-cover {
             position: absolute;
@@ -455,6 +490,7 @@
 
     <!-- APP CONTAINER -->
     <div id="app" class="max-w-md mx-auto w-full flex-1 flex flex-col justify-between p-4">
+        <div id="tab-switch-progress" aria-hidden="true"></div>
         
         <!-- DYNAMIC CONTENT AREA -->
         <div id="content" class="flex-1 pb-20">
@@ -1042,6 +1078,9 @@
         let eventsViewMode = 'list'; 
         let selectedCalendarDate = null;
         let eventsTabCache = { events: null, responses: null };
+        let homeTabCache = { announcements: null, events: null };
+        let notificationsTabCache = null;
+        let attendanceTabCache = null;
         let pdfScratchCanvas = null; 
 
         let pdfDoc = null;
@@ -1562,6 +1601,10 @@
                     currentUser = null;
                     currentProfile = null;
                     musicLibraryCache = [];
+                    homeTabCache = { announcements: null, events: null };
+                    notificationsTabCache = null;
+                    eventsTabCache = { events: null, responses: null };
+                    attendanceTabCache = null;
                     offlinePdfPieceIds = new Set();
                     offlinePdfLinks = {};
                     musicTabShellReady = false;
@@ -2404,6 +2447,22 @@
         let pendingTabScrollReset = false;
         let contentHtmlHooked = false;
 
+        function setTabLoading(on) {
+            document.getElementById('app')?.classList.toggle('tab-loading', !!on);
+        }
+
+        function highlightNav(tab) {
+            const nav = document.getElementById('navbar');
+            if (nav) nav.classList.remove('hidden');
+            ['music', 'events', 'home', 'attendance', 'profile'].forEach((t) => {
+                const btn = document.getElementById(`nav-${t}`);
+                if (!btn || t === 'home') return;
+                btn.className = t === tab
+                    ? 'flex-1 flex flex-col items-center justify-center text-indigo-400 font-bold text-[10px] leading-tight h-12'
+                    : 'flex-1 flex flex-col items-center justify-center text-slate-400 font-medium text-[10px] leading-tight h-12';
+            });
+        }
+
         function hookContentHtmlForTabScroll() {
             if (contentHtmlHooked) return;
             const el = document.getElementById('content');
@@ -2416,6 +2475,7 @@
                 get() { return desc.get.call(this); },
                 set(value) {
                     desc.set.call(this, value);
+                    setTabLoading(false);
                     if (!pendingTabScrollReset) return;
                     this.scrollTop = 0;
                     window.scrollTo(0, 0);
@@ -2426,9 +2486,12 @@
         }
 
         function switchTab(tab) {
+            if (tab === activeTab) return;
             if (tab !== 'music') musicTabShellReady = false;
-            if (activeTab !== tab) pendingTabScrollReset = true;
+            pendingTabScrollReset = true;
             activeTab = tab;
+            highlightNav(tab);
+            setTabLoading(true);
             hookContentHtmlForTabScroll();
             renderApp();
         }
@@ -2444,7 +2507,11 @@
             if (!currentUser || requirePasswordSetup) return;
             const previous = activeTab;
             applyLocationHash();
-            if (previous !== activeTab) pendingTabScrollReset = true;
+            if (previous !== activeTab) {
+                pendingTabScrollReset = true;
+                highlightNav(activeTab);
+                setTabLoading(true);
+            }
             hookContentHtmlForTabScroll();
             renderApp();
         });
@@ -2453,19 +2520,7 @@
             if (blockUnofficialApp()) return;
             hookContentHtmlForTabScroll();
             setAuthNarrow(false);
-            document.getElementById('navbar').classList.remove('hidden');
-            ['music', 'events', 'home', 'attendance', 'profile'].forEach(t => {
-                const btn = document.getElementById(`nav-${t}`);
-                if (t === activeTab) {
-                    if (t !== 'home') {
-                        btn.className = "flex-1 flex flex-col items-center justify-center text-indigo-400 font-bold text-[10px] leading-tight h-12";
-                    }
-                } else {
-                    if (t !== 'home') {
-                        btn.className = "flex-1 flex flex-col items-center justify-center text-slate-400 font-medium text-[10px] leading-tight h-12";
-                    }
-                }
-            });
+            highlightNav(activeTab);
 
             if (!currentProfile && currentUser) {
                 await fetchProfile();
@@ -2486,37 +2541,12 @@
         async function renderHomeTab() {
             const content = document.getElementById('content');
 
-            let announcements = null;
-            let events = null;
+            let announcements = homeTabCache.announcements;
+            let events = homeTabCache.events;
             let stale = false;
-            if (navigator.onLine !== false) {
-                try {
-                    const [{ data: liveAnnouncements, error: announcementsError }, { data: liveEvents, error: eventsError }] = await Promise.all([
-                        supabaseClient.from('announcement_log').select('id, title, body, created_at').order('created_at', { ascending: false }).limit(3),
-                        supabaseClient.from('band_events').select('id, event_name, event_type, date, time, location').gte('date', athensNowParts().date).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
-                    ]);
-                    if (!announcementsError && !eventsError) {
-                        announcements = liveAnnouncements || [];
-                        events = liveEvents || [];
-                        await writeTabSnapshot('home', { announcements, events });
-                    }
-                } catch (e) {
-                    console.warn('renderHomeTab', e);
-                }
-            }
-            if (!events) {
-                const cached = await readTabSnapshot('home');
-                if (cached) {
-                    announcements = cached.announcements || [];
-                    events = cached.events || [];
-                    stale = true;
-                }
-            }
-            if (!events) {
-                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Αρχική</h2><p class="text-slate-400 text-sm">Δεν υπάρχουν αποθηκευμένα στοιχεία σε αυτή τη συσκευή. Συνδεθείτε στο διαδίκτυο μία φορά για να εμφανιστεί η αρχική.</p>`;
-                return;
-            }
-            sortEventsChronologically(events);
+            const paintHome = () => {
+                if (activeTab !== 'home' || !events) return;
+                sortEventsChronologically(events);
 
             const firstName = currentProfile?.first_name || currentProfile?.name || 'μουσικέ';
             const vocativeFirstName = getGreekVocativeName(firstName);
@@ -2564,13 +2594,48 @@
                 });
                 html += '</div>';
             }
-            content.innerHTML = html;
+                content.innerHTML = html;
+            };
+
+            if (events) paintHome();
+            else {
+                const cached = await readTabSnapshot('home');
+                if (cached) {
+                    announcements = cached.announcements || [];
+                    events = cached.events || [];
+                    stale = navigator.onLine === false;
+                    paintHome();
+                }
+            }
+            if (navigator.onLine !== false) {
+                try {
+                    const [{ data: liveAnnouncements, error: announcementsError }, { data: liveEvents, error: eventsError }] = await Promise.all([
+                        supabaseClient.from('announcement_log').select('id, title, body, created_at').order('created_at', { ascending: false }).limit(3),
+                        supabaseClient.from('band_events').select('id, event_name, event_type, date, time, location').gte('date', athensNowParts().date).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
+                    ]);
+                    if (!announcementsError && !eventsError) {
+                        announcements = liveAnnouncements || [];
+                        events = liveEvents || [];
+                        stale = false;
+                        homeTabCache = { announcements, events };
+                        await writeTabSnapshot('home', { announcements, events });
+                    }
+                } catch (e) {
+                    console.warn('renderHomeTab', e);
+                }
+            }
+            if (!events) {
+                if (activeTab !== 'home') return;
+                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Αρχική</h2><p class="text-slate-400 text-sm">Δεν υπάρχουν αποθηκευμένα στοιχεία σε αυτή τη συσκευή. Συνδεθείτε στο διαδίκτυο μία φορά για να εμφανιστεί η αρχική.</p>`;
+                return;
+            }
+            paintHome();
         }
 
         async function renderNotificationsTab() {
             const content = document.getElementById('content');
 
-            let announcements = null;
+            let announcements = Array.isArray(notificationsTabCache) ? notificationsTabCache : null;
             let stale = false;
             if (navigator.onLine !== false) {
                 try {
@@ -2580,6 +2645,7 @@
                         .order('created_at', { ascending: false });
                     if (!error) {
                         announcements = data || [];
+                        notificationsTabCache = announcements;
                         await writeTabSnapshot('notifications', { announcements });
                     }
                 } catch (e) {
@@ -2590,9 +2656,11 @@
                 const cached = await readTabSnapshot('notifications');
                 if (cached?.announcements) {
                     announcements = cached.announcements;
+                    notificationsTabCache = announcements;
                     stale = true;
                 }
             }
+            if (activeTab !== 'notifications') return;
             if (!announcements) {
                 content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Ανακοινώσεις</h2><p class="text-slate-400 text-sm">Δεν υπάρχουν αποθηκευμένες ανακοινώσεις σε αυτή τη συσκευή.</p>`;
                 return;
@@ -2655,11 +2723,18 @@
         // --- MUSIC TAB ---
         async function renderMusicTab() {
             const content = document.getElementById('content');
-            const keepShell = musicTabShellReady && document.getElementById('music-results');
+            let keepShell = musicTabShellReady && document.getElementById('music-results');
 
             let music = null;
             let loadError = null;
             let fromOfflineCache = false;
+
+            if (!keepShell && musicLibraryCache.length && activeTab === 'music') {
+                await buildMusicTabShell(content, musicLibraryCache, { fromOfflineCache: navigator.onLine === false });
+                musicTabShellReady = true;
+                keepShell = true;
+                paintMusicResults();
+            }
 
             if (navigator.onLine !== false) {
                 let musicQuery = await supabaseClient
@@ -2683,6 +2758,7 @@
             }
 
             if (!music) {
+                if (activeTab !== 'music') return;
                 musicTabShellReady = false;
                 content.innerHTML = `<p class="text-slate-400 text-sm">Δεν υπάρχουν αποθηκευμένες παρτιτούρες σε αυτή τη συσκευή.</p>`;
                 return;
@@ -2692,6 +2768,7 @@
             if (!fromOfflineCache && currentUser?.id && musicLibraryCache.length) {
                 await persistOfflineSessionSnapshot({ library: musicLibraryCache });
             }
+            if (activeTab !== 'music') return;
             await refreshOfflinePdfFlags();
             if (!keepShell) {
                 await buildMusicTabShell(content, musicLibraryCache, { fromOfflineCache });
@@ -4293,11 +4370,34 @@
         async function renderEventsTab(options = {}) {
             const content = document.getElementById('content');
 
-            let events = null;
-            let responses = [];
-            let stale = false;
+            let events = options._paintOnly ? options.events : null;
+            let responses = options._paintOnly ? (options.responses || []) : [];
+            let stale = options._paintOnly ? !!options.stale : false;
+            if (!options._paintOnly && !options.quiet) {
+                if (eventsTabCache.events) {
+                    await renderEventsTab({
+                        quiet: true,
+                        _paintOnly: true,
+                        events: eventsTabCache.events,
+                        responses: eventsTabCache.responses || [],
+                        pastOpen: options.pastOpen
+                    });
+                } else {
+                    const cachedNow = await readTabSnapshot('events');
+                    if (cachedNow?.events) {
+                        await renderEventsTab({
+                            quiet: true,
+                            _paintOnly: true,
+                            events: cachedNow.events,
+                            responses: cachedNow.responses || [],
+                            stale: true,
+                            pastOpen: options.pastOpen
+                        });
+                    }
+                }
+            }
             const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
-            if (navigator.onLine !== false) {
+            if (!options._paintOnly && navigator.onLine !== false) {
                 try {
                     const { data: liveEvents, error: eventError } = await supabaseClient.from('band_events').select('*').order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true });
                     if (!eventError) {
@@ -4311,7 +4411,7 @@
                     console.warn('renderEventsTab', e);
                 }
             }
-            if (!events) {
+            if (!options._paintOnly && !events) {
                 const cached = await readTabSnapshot('events');
                 if (cached?.events) {
                     events = cached.events;
@@ -4319,6 +4419,7 @@
                     stale = true;
                 }
             }
+            if (activeTab !== 'events') return;
             if (!events) {
                 content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Πρόγραμμα</h2><p class="text-slate-400 text-sm">Δεν υπάρχει αποθηκευμένο πρόγραμμα σε αυτή τη συσκευή.</p>`;
                 return;
@@ -4476,11 +4577,13 @@
                                 .from('event_responses')
                                 .select('status, excuse, user_email, event_id, actual_attendance');
                             allAttendance = liveAtt || [];
+                            attendanceTabCache = { events, profiles, allAttendance, myResponses };
                             await writeTabSnapshot('attendance', { mode: 'staff', events, profiles, allAttendance });
                         } else {
                             const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
                             const { data: liveMine } = await supabaseClient.from('event_responses').select('*').eq('user_email', userEmail);
                             myResponses = liveMine || [];
+                            attendanceTabCache = { events, profiles, allAttendance, myResponses };
                             await writeTabSnapshot('attendance', { mode: 'self', events, myResponses });
                         }
                     }
@@ -4489,15 +4592,16 @@
                 }
             }
             if (!events) {
-                const cached = await readTabSnapshot('attendance');
+                const cached = attendanceTabCache || await readTabSnapshot('attendance');
                 if (cached?.events) {
                     events = cached.events;
                     profiles = cached.profiles || [];
                     allAttendance = cached.allAttendance || [];
                     myResponses = cached.myResponses || [];
-                    stale = true;
+                    stale = !attendanceTabCache;
                 }
             }
+            if (activeTab !== 'attendance') return;
             if (!events) {
                 content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Παρουσίες</h2><p class="text-slate-400 text-sm">Δεν υπάρχουν αποθηκευμένες παρουσίες σε αυτή τη συσκευή.</p>`;
                 return;
@@ -5545,6 +5649,7 @@
             }
 
             const adminAssignmentsHtml = isAdminRole() ? await buildAdminAssignmentPanel() : '';
+            if (activeTab !== 'profile') return;
 
             content.innerHTML = `
                 <div class="flex items-center justify-between mb-4">
