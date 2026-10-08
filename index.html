@@ -2454,7 +2454,6 @@
 
         async function renderHomeTab() {
             const content = document.getElementById('content');
-            content.innerHTML = '<h2 class="text-2xl font-bold mb-4">Αρχική</h2><p class="text-slate-400 text-sm">Φόρτωση...</p>';
 
             let announcements = null;
             let events = null;
@@ -2539,7 +2538,6 @@
 
         async function renderNotificationsTab() {
             const content = document.getElementById('content');
-            content.innerHTML = '<h2 class="text-2xl font-bold mb-4">Ανακοινώσεις</h2><p class="text-slate-400 text-sm">Φόρτωση ανακοινώσεων...</p>';
 
             let announcements = null;
             let stale = false;
@@ -2627,9 +2625,6 @@
         async function renderMusicTab() {
             const content = document.getElementById('content');
             const keepShell = musicTabShellReady && document.getElementById('music-results');
-            if (!keepShell) {
-                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Παρτιτούρες</h2><p class="text-slate-400 text-sm">Φόρτωση βιβλιοθήκης...</p>`;
-            }
 
             let music = null;
             let loadError = null;
@@ -4240,9 +4235,6 @@
         // --- EVENTS TAB ---
         async function renderEventsTab(options = {}) {
             const content = document.getElementById('content');
-            if (!options.quiet) {
-                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Πρόγραμμα</h2><p class="text-slate-400 text-sm">Φόρτωση προγράμματος...</p>`;
-            }
 
             let events = null;
             let responses = [];
@@ -4407,7 +4399,6 @@
         // --- ATTENDANCE TAB (Fixed to map first_name + last_name correctly) ---
         async function renderAttendanceTab() {
             const content = document.getElementById('content');
-            content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Παρουσίες</h2><p class="text-slate-400 text-sm">Φόρτωση αναφοράς...</p>`;
 
             const isAdmin = isPrivilegedRole();
             let events = null;
