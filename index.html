@@ -90,9 +90,20 @@
             display: flex !important;
             flex-direction: column;
             z-index: 60;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            height: 100dvh;
+            min-height: 100dvh;
+            max-width: none;
+            background: #020617;
         }
         html.pdf-open #navbar {
             display: none !important;
+        }
+        html.pdf-open #app {
+            visibility: hidden !important;
+            pointer-events: none !important;
         }
         #need-network {
             display: none;
@@ -521,7 +532,7 @@
     </div>
 
     <!-- PDF VIEWER & ANNOTATION MODAL CONTAINER -->
-    <div id="pdf-viewer-container" class="hidden fixed inset-0 bg-slate-950/95 z-50 flex flex-col p-0 max-w-none">
+    <div id="pdf-viewer-container" class="hidden fixed inset-0 bg-slate-950 z-50 flex flex-col p-0 max-w-none">
         <button type="button" onclick="closePdfViewer()" aria-label="Κλείσιμο παρτιτούρας" class="viewer-chrome viewer-float left-3 text-slate-200 text-lg w-10 h-10 rounded-full">×</button>
         <div id="page-indicator" class="viewer-chrome viewer-float page-indicator right-3 px-3 py-1.5 rounded-full">
             <span id="page-num-display" class="text-indigo-300 font-medium min-w-[56px] text-center text-xs">1 / 1</span>
@@ -2491,7 +2502,7 @@
             pendingTabScrollReset = true;
             activeTab = tab;
             highlightNav(tab);
-            setTabLoading(true);
+            setTabLoading(tab !== 'profile');
             hookContentHtmlForTabScroll();
             renderApp();
         }
@@ -2510,7 +2521,7 @@
             if (previous !== activeTab) {
                 pendingTabScrollReset = true;
                 highlightNav(activeTab);
-                setTabLoading(true);
+                setTabLoading(activeTab !== 'profile');
             }
             hookContentHtmlForTabScroll();
             renderApp();
