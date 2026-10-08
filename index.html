@@ -179,6 +179,38 @@
         html.pdf-open body {
             overflow: hidden !important;
         }
+        #pdf-loading-cover {
+            position: absolute;
+            inset: 0;
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            background: rgba(2, 6, 23, 0.94);
+            color: #c7d2fe;
+            font-size: 13px;
+            pointer-events: auto;
+        }
+        #pdf-loading-cover.hidden {
+            display: none !important;
+        }
+        #pdf-loading-cover::before {
+            content: '';
+            width: 28px;
+            height: 28px;
+            border: 3px solid #334155;
+            border-top-color: #818cf8;
+            border-radius: 50%;
+            animation: pdf-spin 0.7s linear infinite;
+        }
+        #pdf-loading-cover::after {
+            content: 'Φόρτωση παρτιτούρας…';
+        }
+        @keyframes pdf-spin {
+            to { transform: rotate(360deg); }
+        }
         #pdf-viewer-container > .viewer-float:not(#viewer-show-controls) {
             top: calc(env(safe-area-inset-top, 0px) + 12px);
         }
@@ -822,8 +854,7 @@
         }
 
         function isPdfViewerOpen() {
-            const el = document.getElementById('pdf-viewer-container');
-            return !!(typeof pdfDoc !== 'undefined' && pdfDoc && el && !el.classList.contains('hidden'));
+            return document.documentElement.classList.contains('pdf-open');
         }
 
         function resumeAppAfterBackground(event) {
@@ -3161,13 +3192,21 @@
             return run;
         }
 
+        let pdfOpenBusy = false;
+        let pdfShareBusy = false;
+
         async function openSecurePdf(filePath, pieceId) {
-            keepAwakeForPdf();
+            if (pdfOpenBusy || isPdfViewerOpen()) return;
+            pdfOpenBusy = true;
+            showPdfViewerShell({ pieceId });
             try {
                 const bytes = await bytesForSheetPdf(filePath, pieceId);
-                await openPdfViewer(bytes, pieceId);
+                await openPdfViewer(bytes, pieceId, { shellReady: true });
             } catch (error) {
                 showAppNotice('Σφάλμα πρόσβασης στο αρχείο: ' + signedPdfErrorMessage(error));
+                await closePdfViewer();
+            } finally {
+                pdfOpenBusy = false;
             }
         }
 
@@ -3230,6 +3269,8 @@
         }
 
         async function shareSheetPdf(filePath, encodedTitle, pieceId) {
+            if (pdfShareBusy || pdfOpenBusy) return;
+            pdfShareBusy = true;
             const title = decodeURIComponent(encodedTitle || 'partitura');
             try {
                 const file = await fetchSignedPdfFile(filePath, title, pieceId);
@@ -3244,8 +3285,11 @@
                 a.click();
                 setTimeout(() => URL.revokeObjectURL(url), 1000);
             } catch (e) {
-                if (e?.name === 'AbortError') return;
-                showAppNotice('Αδυναμία κοινοποίησης: ' + (e.message || 'Άγνωστο σφάλμα'));
+                if (e?.name !== 'AbortError') {
+                    showAppNotice('Αδυναμία κοινοποίησης: ' + (e.message || 'Άγνωστο σφάλμα'));
+                }
+            } finally {
+                pdfShareBusy = false;
             }
         }
 
@@ -3352,14 +3396,14 @@
             document.getElementById('pdf-loading-cover')?.classList.toggle('hidden', !visible);
         }
 
-        async function openPdfViewer(pdfUrl, pieceId, options = {}) {
+        function showPdfViewerShell(options = {}) {
             keepAwakeForPdf();
             if (!viewerHistoryActive) {
                 history.pushState({ ...(history.state || {}), pdfViewer: true }, '');
                 viewerHistoryActive = true;
             }
             pdfReadOnly = !!options.readOnly;
-            activePieceId = pieceId;
+            activePieceId = options.pieceId != null ? options.pieceId : activePieceId;
             pageNum = 1;
             annotationsDirty = false;
             wipeViewerSurfaces();
@@ -3373,19 +3417,26 @@
             document.documentElement.classList.add('pdf-open');
             updateViewerToggleIcon(false);
             setViewportMeta(true);
-
             bindViewerCanvases();
             if (viewer && !viewer.dataset.awakeBound) {
                 viewer.dataset.awakeBound = '1';
                 viewer.addEventListener('touchstart', keepAwakeForPdf, { passive: true });
                 viewer.addEventListener('pointerdown', keepAwakeForPdf);
             }
-            scoreStage.style.transformOrigin = 'top center';
-
+            if (scoreStage) scoreStage.style.transformOrigin = 'top center';
             setupDrawingEvents();
             setupScoreGestures();
             setTool('hand');
             keepAwakeForPdf();
+        }
+
+        async function openPdfViewer(pdfUrl, pieceId, options = {}) {
+            if (!options.shellReady) showPdfViewerShell({ readOnly: options.readOnly, pieceId });
+            else {
+                pdfReadOnly = !!options.readOnly;
+                activePieceId = pieceId;
+                document.getElementById('pdf-viewer-container')?.classList.toggle('pdf-readonly', pdfReadOnly);
+            }
 
             try {
                 const loadingTask = pdfjsLib.getDocument(
@@ -3450,17 +3501,23 @@
         }
 
         async function openInternalRegulations() {
-            keepAwakeForPdf();
-            const latest = await getLatestInternalRegulations();
-            if (latest.error || !latest.path) {
-                showAppNotice('Σφάλμα πρόσβασης στον κανονισμό: ' + (latest.error?.message || 'Το αρχείο δεν βρέθηκε.'));
-                return;
-            }
+            if (pdfOpenBusy || isPdfViewerOpen()) return;
+            pdfOpenBusy = true;
+            showPdfViewerShell({ readOnly: true, pieceId: 'internal-regulations' });
             try {
+                const latest = await getLatestInternalRegulations();
+                if (latest.error || !latest.path) {
+                    showAppNotice('Σφάλμα πρόσβασης στον κανονισμό: ' + (latest.error?.message || 'Το αρχείο δεν βρέθηκε.'));
+                    await closePdfViewer();
+                    return;
+                }
                 const bytes = await loadSignedPdfBytes(INTERNAL_DOCS_BUCKET, latest.path);
-                return openPdfViewer(bytes, 'internal-regulations', { readOnly: true });
+                return openPdfViewer(bytes, 'internal-regulations', { readOnly: true, shellReady: true });
             } catch (error) {
                 showAppNotice('Σφάλμα πρόσβασης στον κανονισμό: ' + signedPdfErrorMessage(error));
+                await closePdfViewer();
+            } finally {
+                pdfOpenBusy = false;
             }
         }
 
