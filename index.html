@@ -2370,10 +2370,24 @@
         }
 
         let activeTab = 'home';
+        function resetTabScroll() {
+            const scroller = document.getElementById('content');
+            if (scroller) scroller.scrollTop = 0;
+            window.scrollTo(0, 0);
+        }
+
         function switchTab(tab) {
             if (tab !== 'music') musicTabShellReady = false;
+            const changed = activeTab !== tab;
             activeTab = tab;
-            renderApp();
+            const render = renderApp();
+            if (changed) {
+                resetTabScroll();
+                Promise.resolve(render).finally(() => {
+                    resetTabScroll();
+                    requestAnimationFrame(resetTabScroll);
+                });
+            }
         }
 
         function applyLocationHash() {
@@ -2385,8 +2399,16 @@
 
         window.addEventListener('hashchange', () => {
             if (!currentUser || requirePasswordSetup) return;
+            const previous = activeTab;
             applyLocationHash();
-            renderApp();
+            const render = renderApp();
+            if (previous !== activeTab) {
+                resetTabScroll();
+                Promise.resolve(render).finally(() => {
+                    resetTabScroll();
+                    requestAnimationFrame(resetTabScroll);
+                });
+            }
         });
 
         async function renderApp() {
