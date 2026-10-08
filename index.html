@@ -2370,24 +2370,36 @@
         }
 
         let activeTab = 'home';
-        function resetTabScroll() {
-            const scroller = document.getElementById('content');
-            if (scroller) scroller.scrollTop = 0;
-            window.scrollTo(0, 0);
+        let pendingTabScrollReset = false;
+        let contentHtmlHooked = false;
+
+        function hookContentHtmlForTabScroll() {
+            if (contentHtmlHooked) return;
+            const el = document.getElementById('content');
+            if (!el) return;
+            const desc = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+            if (!desc?.get || !desc?.set) return;
+            Object.defineProperty(el, 'innerHTML', {
+                configurable: true,
+                enumerable: true,
+                get() { return desc.get.call(this); },
+                set(value) {
+                    desc.set.call(this, value);
+                    if (!pendingTabScrollReset) return;
+                    this.scrollTop = 0;
+                    window.scrollTo(0, 0);
+                    pendingTabScrollReset = false;
+                }
+            });
+            contentHtmlHooked = true;
         }
 
         function switchTab(tab) {
             if (tab !== 'music') musicTabShellReady = false;
-            const changed = activeTab !== tab;
+            if (activeTab !== tab) pendingTabScrollReset = true;
             activeTab = tab;
-            const render = renderApp();
-            if (changed) {
-                resetTabScroll();
-                Promise.resolve(render).finally(() => {
-                    resetTabScroll();
-                    requestAnimationFrame(resetTabScroll);
-                });
-            }
+            hookContentHtmlForTabScroll();
+            renderApp();
         }
 
         function applyLocationHash() {
@@ -2401,18 +2413,14 @@
             if (!currentUser || requirePasswordSetup) return;
             const previous = activeTab;
             applyLocationHash();
-            const render = renderApp();
-            if (previous !== activeTab) {
-                resetTabScroll();
-                Promise.resolve(render).finally(() => {
-                    resetTabScroll();
-                    requestAnimationFrame(resetTabScroll);
-                });
-            }
+            if (previous !== activeTab) pendingTabScrollReset = true;
+            hookContentHtmlForTabScroll();
+            renderApp();
         });
 
         async function renderApp() {
             if (blockUnofficialApp()) return;
+            hookContentHtmlForTabScroll();
             setAuthNarrow(false);
             document.getElementById('navbar').classList.remove('hidden');
             ['music', 'events', 'home', 'attendance', 'profile'].forEach(t => {
