@@ -1092,6 +1092,8 @@
         let homeTabCache = { announcements: null, events: null };
         let notificationsTabCache = null;
         let attendanceTabCache = null;
+        let regulationsMetaCache = { date: '', path: '' };
+        let adminAssignmentsHtmlCache = '';
         let pdfScratchCanvas = null; 
 
         let pdfDoc = null;
@@ -1592,7 +1594,10 @@
                     currentUser = nextSession.user;
                     if (event === 'TOKEN_REFRESHED') return;
                     await fetchProfile();
-                    if (navigator.onLine !== false) warmScoreCache();
+                    if (navigator.onLine !== false) {
+                        warmScoreCache();
+                        warmTabData();
+                    }
                     renderApp();
                     hideNeedNetworkScreen();
                 } else if (event !== 'INITIAL_SESSION' || authReady) {
@@ -1616,6 +1621,8 @@
                     notificationsTabCache = null;
                     eventsTabCache = { events: null, responses: null };
                     attendanceTabCache = null;
+                    regulationsMetaCache = { date: '', path: '' };
+                    adminAssignmentsHtmlCache = '';
                     offlinePdfPieceIds = new Set();
                     offlinePdfLinks = {};
                     musicTabShellReady = false;
@@ -1638,7 +1645,10 @@
                 }
                 await fetchProfile();
                 if (navigator.onLine === false) activeTab = 'music';
-                else warmScoreCache();
+                else {
+                    warmScoreCache();
+                    warmTabData();
+                }
                 renderApp();
                 hideNeedNetworkScreen();
                 return;
@@ -2072,6 +2082,44 @@
             }
         }
 
+        async function warmTabData() {
+            if (!currentUser?.id || navigator.onLine === false) return;
+            const userEmail = (currentUser?.email || currentProfile?.email || '').trim().toLowerCase();
+            getLatestInternalRegulations().then((latest) => {
+                if (latest && !latest.error) regulationsMetaCache = latest;
+            }).catch(() => {});
+            Promise.all([
+                supabaseClient.from('announcement_log').select('id, title, body, created_at').order('created_at', { ascending: false }).limit(3),
+                supabaseClient.from('band_events').select('id, event_name, event_type, date, time, location').gte('date', athensNowParts().date).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
+            ]).then(async ([{ data: announcements, error: aErr }, { data: events, error: eErr }]) => {
+                if (aErr || eErr) return;
+                homeTabCache = { announcements: announcements || [], events: events || [] };
+                await writeTabSnapshot('home', homeTabCache);
+            }).catch(() => {});
+            supabaseClient.from('band_events').select('*').order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
+                .then(async ({ data: events, error }) => {
+                    if (error || !events) return;
+                    let responses = [];
+                    if (userEmail) {
+                        const { data } = await supabaseClient.from('event_responses').select('*').eq('user_email', userEmail);
+                        responses = data || [];
+                    }
+                    eventsTabCache = { events, responses };
+                    await writeTabSnapshot('events', { events, responses });
+                }).catch(() => {});
+            supabaseClient.from('announcement_log').select('id, title, body, sent_by_email, created_at').order('created_at', { ascending: false })
+                .then(async ({ data, error }) => {
+                    if (error || !data) return;
+                    notificationsTabCache = data;
+                    await writeTabSnapshot('notifications', { announcements: data });
+                }).catch(() => {});
+            if (isAdminRole()) {
+                buildAdminAssignmentPanel().then((html) => {
+                    if (html) adminAssignmentsHtmlCache = html;
+                }).catch(() => {});
+            }
+        }
+
         function isAdminRole() {
             return profileHasAdminRole(currentProfile);
         }
@@ -2502,7 +2550,7 @@
             pendingTabScrollReset = true;
             activeTab = tab;
             highlightNav(tab);
-            setTabLoading(tab !== 'profile');
+            setTabLoading(true);
             hookContentHtmlForTabScroll();
             renderApp();
         }
@@ -2521,7 +2569,7 @@
             if (previous !== activeTab) {
                 pendingTabScrollReset = true;
                 highlightNav(activeTab);
-                setTabLoading(activeTab !== 'profile');
+                setTabLoading(true);
             }
             hookContentHtmlForTabScroll();
             renderApp();
@@ -5620,12 +5668,9 @@
 
         async function renderProfileTab() {
             const content = document.getElementById('content');
+            const paintProfile = (regulationsUpdated, adminAssignmentsHtml) => {
+            if (activeTab !== 'profile') return;
             const roleDisplay = isAdminRole() ? 'Διαχειριστής' : (isConductorRole() ? 'Μαέστρος' : 'Μουσικός');
-            const latestRegulations = await getLatestInternalRegulations();
-            const regulationsUpdated = latestRegulations.date
-                ? `Τελευταία ενημέρωση: ${latestRegulations.date}`
-                : 'Τελευταία ενημέρωση: —';
-            
             const firstName = currentProfile?.first_name || currentProfile?.name || '';
             const lastName = currentProfile?.last_name || '';
             const instrument = assignmentLabels().join(', ')
@@ -5658,9 +5703,6 @@
                     </div>
                 `;
             }
-
-            const adminAssignmentsHtml = isAdminRole() ? await buildAdminAssignmentPanel() : '';
-            if (activeTab !== 'profile') return;
 
             content.innerHTML = `
                 <div class="flex items-center justify-between mb-4">
@@ -5715,6 +5757,21 @@
                 bindAdminAssignmentPanel();
                 document.getElementById('regulations-file')?.addEventListener('change', uploadInternalRegulations);
             }
+            };
+            paintProfile(
+                regulationsMetaCache.date ? `Τελευταία ενημέρωση: ${regulationsMetaCache.date}` : 'Τελευταία ενημέρωση: —',
+                isAdminRole() ? adminAssignmentsHtmlCache : ''
+            );
+            const [latestRegulations, adminAssignmentsHtml] = await Promise.all([
+                getLatestInternalRegulations(),
+                isAdminRole() ? buildAdminAssignmentPanel() : Promise.resolve('')
+            ]);
+            if (latestRegulations && !latestRegulations.error) regulationsMetaCache = latestRegulations;
+            if (isAdminRole()) adminAssignmentsHtmlCache = adminAssignmentsHtml || '';
+            paintProfile(
+                regulationsMetaCache.date ? `Τελευταία ενημέρωση: ${regulationsMetaCache.date}` : 'Τελευταία ενημέρωση: —',
+                isAdminRole() ? adminAssignmentsHtmlCache : ''
+            );
         }
 
         async function buildAdminAssignmentPanel() {
