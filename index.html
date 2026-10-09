@@ -172,6 +172,13 @@
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
         }
+        .tab-sticky {
+            position: sticky;
+            top: 0;
+            z-index: 4;
+            background: #0f172a;
+            padding-bottom: 0.5rem;
+        }
         .ui-icon {
             display: inline-block;
             vertical-align: -0.2em;
@@ -736,6 +743,7 @@
         async function restoreOfflineSessionSnapshot() {
             if (!currentUser?.id) return false;
             const snap = await scoresGetMeta(currentUser.id);
+            cachedGreetingName = snap?.greetingName || snap?.profile?.first_name || snap?.profile?.name || snap?.tabs?.home?.firstName || cachedGreetingName;
             if (!snap?.profile) return false;
             currentProfile = snap.profile;
             assignmentDirectory = Array.isArray(snap.assignmentDirectory)
@@ -744,13 +752,25 @@
             if (Array.isArray(snap.library) && snap.library.length && !musicLibraryCache.length) {
                 musicLibraryCache = snap.library;
             }
+            cachedGreetingName = snap.greetingName || snap.profile?.first_name || snap.profile?.name || snap.tabs?.home?.firstName || cachedGreetingName;
             return true;
+        }
+
+        function greetingFirstName() {
+            const live = (currentProfile?.first_name || currentProfile?.name || '').trim();
+            if (live) {
+                cachedGreetingName = live;
+                return live;
+            }
+            return (cachedGreetingName || '').trim();
         }
 
         async function persistOfflineSessionSnapshot(extra = {}) {
             if (!currentUser?.id || !currentProfile) return;
+            const greetingName = greetingFirstName();
             await scoresPutMeta(currentUser.id, {
                 profile: currentProfile,
+                greetingName,
                 assignmentDirectory: currentProfile.assignments || assignmentDirectory || [],
                 ...extra
             });
@@ -1094,6 +1114,7 @@
         let attendanceTabCache = null;
         let regulationsMetaCache = { date: '', path: '' };
         let adminAssignmentsHtmlCache = '';
+        let cachedGreetingName = '';
         let pdfScratchCanvas = null; 
 
         let pdfDoc = null;
@@ -1623,6 +1644,7 @@
                     attendanceTabCache = null;
                     regulationsMetaCache = { date: '', path: '' };
                     adminAssignmentsHtmlCache = '';
+                    cachedGreetingName = '';
                     offlinePdfPieceIds = new Set();
                     offlinePdfLinks = {};
                     musicTabShellReady = false;
@@ -2093,7 +2115,7 @@
                 supabaseClient.from('band_events').select('id, event_name, event_type, date, time, location').gte('date', athensNowParts().date).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
             ]).then(async ([{ data: announcements, error: aErr }, { data: events, error: eErr }]) => {
                 if (aErr || eErr) return;
-                homeTabCache = { announcements: announcements || [], events: events || [] };
+                homeTabCache = { announcements: announcements || [], events: events || [], firstName: greetingFirstName() };
                 await writeTabSnapshot('home', homeTabCache);
             }).catch(() => {});
             supabaseClient.from('band_events').select('*').order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
@@ -2607,10 +2629,11 @@
                 if (activeTab !== 'home' || !events) return;
                 sortEventsChronologically(events);
 
-            const firstName = currentProfile?.first_name || currentProfile?.name || 'μουσικέ';
+            const firstName = greetingFirstName() || 'μουσικέ';
             const vocativeFirstName = getGreekVocativeName(firstName);
             const nextEvent = (events || []).find(ev => !isRehearsalEvent(ev) && !eventHasEnded(ev));
             let html = stale ? staleSnapshotBanner() : '';
+            html += `<div class="tab-sticky">`;
             html += `
                 <div class="flex items-center justify-between mb-5">
                     <div>
@@ -2635,8 +2658,9 @@
             html += `
                 <div class="flex items-center justify-between mb-2">
                     <h2 class="text-lg font-bold">Τελευταίες ανακοινώσεις</h2>
-                    <button onclick="switchTab('notifications')" class="text-xs text-indigo-300 hover:text-indigo-200 underline">Όλες</button>
+                    <button type="button" onclick="switchTab('notifications')" class="text-xs text-indigo-300 hover:text-indigo-200 underline">Όλες</button>
                 </div>
+            </div>
             `;
             if (!announcements || announcements.length === 0) {
                 html += '<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">Δεν υπάρχουν ανακοινώσεις ακόμα.</div>';
@@ -2662,6 +2686,7 @@
                 if (cached) {
                     announcements = cached.announcements || [];
                     events = cached.events || [];
+                    if (cached.firstName) cachedGreetingName = cached.firstName;
                     stale = navigator.onLine === false;
                     paintHome();
                 }
@@ -2676,8 +2701,8 @@
                         announcements = liveAnnouncements || [];
                         events = liveEvents || [];
                         stale = false;
-                        homeTabCache = { announcements, events };
-                        await writeTabSnapshot('home', { announcements, events });
+                        homeTabCache = { announcements, events, firstName: greetingFirstName() };
+                        await writeTabSnapshot('home', homeTabCache);
                     }
                 } catch (e) {
                     console.warn('renderHomeTab', e);
@@ -2726,8 +2751,12 @@
             }
 
             let html = (stale ? staleSnapshotBanner() : '') + `
-                <div class="flex items-center justify-between mb-4">
+                <div class="tab-sticky flex items-center justify-between gap-2 mb-4">
                     <h2 class="text-2xl font-bold">Ανακοινώσεις</h2>
+                    <div class="flex items-center gap-2 shrink-0">
+                        ${isPrivilegedRole() && navigator.onLine !== false ? `<button type="button" onclick="openAnnouncementComposer()" class="text-xs font-semibold text-indigo-300 hover:text-indigo-200">Νέα</button>` : ''}
+                        <button type="button" onclick="switchTab('home')" class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 text-xl leading-none" aria-label="Κλείσιμο">×</button>
+                    </div>
                 </div>
             `;
 
@@ -2882,6 +2911,7 @@
             const { allSets, partNames } = filteredMusicRows();
 
             let html = `
+                <div class="tab-sticky mb-3">
                 <div class="flex items-center justify-between mb-3">
                     <div>
                         <h2 class="text-2xl font-bold">Παρτιτούρες</h2>
@@ -2889,7 +2919,7 @@
                     </div>
                 </div>
                 <p id="music-offline-banner" class="${options.fromOfflineCache ? '' : 'hidden '}text-[11px] text-amber-200/90 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2 mb-3">Χωρίς σύνδεση — ανοίγουν μόνο όσες παρτιτούρες έχουν ήδη αποθηκευτεί σε αυτή τη συσκευή.</p>
-                <div class="bg-slate-800 p-3 rounded-xl border border-slate-700 mb-3 space-y-2">
+                <div class="bg-slate-800 p-3 rounded-xl border border-slate-700 mb-0 space-y-2">
                     <div class="relative">
                         <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">${uiIcon('magnifying-glass', 'h-4 w-4')}</span>
                         <input type="search" id="mf-search" value="${escapeHtml(musicFilter.search)}" placeholder="Αναζήτηση τίτλου, συνθέτη..."
@@ -2913,6 +2943,7 @@
                     </div>
                     <div id="music-count" class="text-[10px] text-slate-500 pt-0.5"></div>
                     <div id="music-sync-status" class="text-[11px] text-indigo-300 pt-1"></div>
+                </div>
                 </div>
                 <div id="music-results"></div>
             `;
@@ -3001,25 +3032,25 @@
             if (saved >= total) {
                 el.className = 'text-[11px] text-emerald-400/90 pt-1';
                 el.textContent = total === 1
-                    ? '1 παρτιτούρα έτοιμη χωρίς σύνδεση'
-                    : `${total} παρτιτούρες έτοιμες χωρίς σύνδεση`;
+                    ? '1 παρτιτούρα διαθέσιμη εκτός σύνδεσης'
+                    : `${total} παρτιτούρες διαθέσιμες εκτός σύνδεσης`;
                 return;
             }
             if (navigator.onLine === false) {
                 el.className = 'text-[11px] text-amber-200/90 pt-1';
-                el.textContent = `${saved} από ${total} έτοιμες χωρίς σύνδεση`;
+                el.textContent = `${saved} από ${total} διαθέσιμες εκτός σύνδεσης`;
                 return;
             }
             const leftover = total - saved;
             const leftoverFailed = leftover && leftover === musicPdfPool().filter((item) => !pieceIsOnDevice(item) && scorePrefetchFailedIds.has(Number(item.id))).length;
             if (scorePrefetchQuotaAt && leftover) {
                 el.className = 'text-[11px] text-amber-200/90 pt-1';
-                el.textContent = `${saved} έτοιμες χωρίς σύνδεση. Η συσκευή δεν έχει άλλο χώρο για τις υπόλοιπες ${leftover}.`;
+                el.textContent = `${saved} διαθέσιμες εκτός σύνδεσης. Η συσκευή δεν έχει άλλο χώρο για τις υπόλοιπες ${leftover}.`;
                 return;
             }
             if (!scorePrefetchInFlight && leftoverFailed) {
                 el.className = 'text-[11px] text-amber-200/90 pt-1';
-                el.textContent = `${saved} έτοιμες χωρίς σύνδεση · ${leftover} δεν κατέβηκαν. Ανοίξτε τις με σύνδεση.`;
+                el.textContent = `${saved} διαθέσιμες εκτός σύνδεσης · ${leftover} δεν κατέβηκαν. Ανοίξτε τις με σύνδεση.`;
                 return;
             }
             el.className = 'text-[11px] text-indigo-300 pt-1';
@@ -3053,7 +3084,7 @@
                             <p class="text-xs text-slate-400 truncate">${escapeHtml(item.composer || 'Άγνωστος Συνθέτης')} • ${escapeHtml(musicPartLabel(item))}</p>
                         </div>
                         <div class="flex items-center space-x-1.5 shrink-0 ml-2">
-                            ${pieceIsOnDevice(item) ? `<span class="text-emerald-400" title="Έτοιμη χωρίς σύνδεση" aria-label="Έτοιμη χωρίς σύνδεση">${uiIcon('wifi-slash', 'h-4 w-4')}</span>` : ''}
+                            ${pieceIsOnDevice(item) ? `<span class="text-emerald-400" title="Διαθέσιμη εκτός σύνδεσης" aria-label="Διαθέσιμη εκτός σύνδεσης">${uiIcon('wifi-slash', 'h-4 w-4')}</span>` : ''}
                             ${filePath ? `
                             <button type="button" onclick="shareSheetPdf('${encodeURIComponent(filePath)}', '${encodeURIComponent(item.piece_title || 'partitura')}', ${Number(item.id)})" class="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100" aria-label="Κοινοποίηση παρτιτούρας" title="Κοινοποίηση">
                                 <svg aria-hidden="true" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.5"></circle><circle cx="6" cy="12" r="2.5"></circle><circle cx="18" cy="19" r="2.5"></circle><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6"></path></svg>
@@ -4487,7 +4518,7 @@
             eventsTabCache = { events: events || [], responses: responses || [] };
 
             let html = (stale ? staleSnapshotBanner() : '') + `
-                <div class="flex justify-between items-center mb-4">
+                <div class="tab-sticky flex justify-between items-center mb-4">
                     <div class="flex items-center space-x-2">
                         <h2 class="text-2xl font-bold">Πρόγραμμα</h2>
                     </div>
@@ -4668,7 +4699,7 @@
             sortEventsChronologically(events);
 
             let html = (stale ? staleSnapshotBanner() : '') + `
-                <div class="flex items-center justify-between mb-1">
+                <div class="tab-sticky flex items-center justify-between mb-1">
                     <h2 class="text-2xl font-bold">Παρουσίες</h2>
                 </div>
             `;
@@ -4676,36 +4707,6 @@
             if (isAdmin) {
                 html += `<p class="text-xs text-slate-400 mb-2">Συγκεντρωτική κατάσταση παρουσιών</p>
                 <button onclick="exportAttendanceWorkbook()" class="mb-3 w-full bg-emerald-700 hover:bg-emerald-600 text-white py-2 rounded-lg text-xs font-semibold">Εξαγωγή παρουσιών (Excel)</button>`;
-
-                const vapidOK = !!urlB64ToUint8Array(VAPID_PUBLIC_KEY);
-                const edgeFnOK = !!(PUSH_EDGE_FUNCTION_URL && PUSH_EDGE_FUNCTION_URL.length > 20);
-                const statusColor = (!vapidOK || !edgeFnOK) ? 'bg-amber-900/40 border-amber-700/50 text-amber-300' : 'bg-emerald-900/40 border-emerald-700/50 text-emerald-300';
-
-                html += `
-                    <details class="mb-4 bg-slate-800 p-3 rounded-xl border border-slate-700">
-                        <summary class="cursor-pointer font-bold text-sm text-amber-300 select-none">Αποστολή ειδοποίησης (διαχειριστής)</summary>
-                        <div class="mt-3 space-y-2">
-                            <div class="${statusColor} border rounded p-2 text-[11px] space-y-0.5">
-                                <div><b>Κατάσταση συστήματος:</b></div>
-                                <div>• VAPID δημόσιο κλειδί: ${vapidOK ? 'Ορισμένο' : 'Δεν έχει οριστεί ακόμα'}</div>
-                                <div>• Edge Function: ${edgeFnOK ? 'Ρυθμισμένο' : 'Δεν έχει οριστεί URL'}</div>
-                            </div>
-                            <div id="push-sub-count" class="text-[11px] text-slate-400 bg-slate-900/60 border border-slate-700/60 rounded p-2">Φόρτωση αριθμού συνδρομητών...</div>
-                            <p class="text-[11px] text-slate-400 pt-1">Στείλτε άμεση ειδοποίηση σε όλους τους μουσικούς που έχουν ενεργοποιήσει τις ειδοποιήσεις.</p>
-                            <input id="push-title" type="text" placeholder="Τίτλος (π.χ., Νέα Πρόβα)"
-                                class="w-full p-2 bg-slate-900 border border-slate-700 rounded text-sm text-white">
-                            <textarea id="push-body" rows="2" placeholder="Μήνυμα (π.χ., Πρόβα Δευτέρα 19:00 στο Ωδείο)"
-                                class="w-full p-2 bg-slate-900 border border-slate-700 rounded text-sm text-white"></textarea>
-
-                            <button onclick="sendAdminAnnouncementDirect()"
-                                class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded text-xs font-bold disabled:opacity-40"
-                                >Αποστολή ειδοποίησης</button>
-
-                            <div id="push-preview" class="hidden bg-slate-900 p-2 rounded border border-slate-700 text-xs space-y-1"></div>
-                            <div id="push-result" class="hidden text-xs rounded p-2 space-y-1"></div>
-                        </div>
-                    </details>
-                `;
 
                 if (!events || events.length === 0) {
                     html += `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">Δεν υπάρχουν εκδηλώσεις.</div>`;
@@ -4907,10 +4908,6 @@
             }
 
             content.innerHTML = html;
-
-            if (isAdmin && !stale) {
-                setTimeout(loadSubscriberCount, 10);
-            }
         }
 
         async function loadSubscriberCount() {
@@ -5418,6 +5415,47 @@
             }
         }
 
+        function closeAnnouncementComposer() {
+            document.getElementById('announce-composer')?.remove();
+        }
+
+        function openAnnouncementComposer() {
+            if (!isPrivilegedRole()) {
+                showAppNotice('Μόνο οι διαχειριστές και ο μαέστρος μπορούν να στείλουν ειδοποιήσεις.');
+                return;
+            }
+            closeAnnouncementComposer();
+            const vapidOK = !!urlB64ToUint8Array(VAPID_PUBLIC_KEY);
+            const edgeFnOK = !!(PUSH_EDGE_FUNCTION_URL && PUSH_EDGE_FUNCTION_URL.length > 20);
+            const dialog = document.createElement('div');
+            dialog.id = 'announce-composer';
+            dialog.className = 'fixed inset-0 z-[10002] bg-black/60 flex items-end sm:items-center justify-center p-4';
+            dialog.innerHTML = `
+                <div class="bg-slate-800 border border-slate-600 rounded-2xl p-4 w-full max-w-sm max-h-[88vh] flex flex-col">
+                    <div class="flex items-center justify-between mb-3 shrink-0">
+                        <h3 class="text-base font-bold text-white">Νέα ανακοίνωση</h3>
+                        <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 hover:text-white hover:bg-slate-700 text-xl leading-none" aria-label="Κλείσιμο">×</button>
+                    </div>
+                    <p class="text-[11px] text-slate-400 mb-2 shrink-0">Στέλνεται ως ειδοποίηση σε όσους την έχουν ενεργοποιήσει, και εμφανίζεται στις Ανακοινώσεις.</p>
+                    <div id="push-sub-count" class="text-[11px] text-slate-400 bg-slate-900/60 border border-slate-700/60 rounded p-2 mb-2 shrink-0">Φόρτωση αριθμού συνδρομητών...</div>
+                    <input id="push-title" type="text" placeholder="Τίτλος (π.χ., Νέα Πρόβα)"
+                        class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white shrink-0">
+                    <textarea id="push-body" rows="6" placeholder="Μήνυμα"
+                        class="w-full mb-3 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white resize-y min-h-[8rem] max-h-[40vh] overflow-y-auto"></textarea>
+                    <div id="push-result" class="hidden text-xs rounded p-2 space-y-1 mb-2"></div>
+                    <button type="button" id="announce-send" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-lg text-sm font-bold shrink-0">Αποστολή ειδοποίησης</button>
+                    ${(!vapidOK || !edgeFnOK) ? `<p class="text-[10px] text-amber-300 mt-2">VAPID: ${vapidOK ? 'ορισμένο' : 'λείπει'} · Edge: ${edgeFnOK ? 'ορισμένο' : 'λείπει URL'}</p>` : ''}
+                </div>`;
+            dialog.querySelector('button[aria-label="Κλείσιμο"]').onclick = closeAnnouncementComposer;
+            dialog.addEventListener('click', (event) => {
+                if (event.target === dialog) closeAnnouncementComposer();
+            });
+            dialog.querySelector('#announce-send').onclick = sendAdminAnnouncementDirect;
+            document.body.appendChild(dialog);
+            setTimeout(loadSubscriberCount, 10);
+            dialog.querySelector('#push-title')?.focus();
+        }
+
         async function sendAdminAnnouncementDirect() {
             if (!isPrivilegedRole()) {
                 showAppNotice('Μόνο οι διαχειριστές και ο μαέστρος μπορούν να στείλουν ειδοποιήσεις.');
@@ -5425,8 +5463,8 @@
             }
             const titleEl = document.getElementById('push-title');
             const bodyEl  = document.getElementById('push-body');
-            const title = (titleEl.value || '').trim();
-            const body  = (bodyEl.value  || '').trim();
+            const title = (titleEl?.value || '').trim();
+            const body  = (bodyEl?.value  || '').trim();
 
             if (!title || !body) { showAppNotice('Παρακαλώ συμπληρώστε τίτλο και μήνυμα.'); return; }
 
@@ -5440,13 +5478,15 @@
                 return;
             }
 
-            const preview = document.getElementById('push-preview');
             const result  = document.getElementById('push-result');
-            preview.classList.remove('hidden');
-            preview.className = 'hidden';
-            result.classList.remove('hidden');
-            result.className = 'text-xs rounded p-2 space-y-1 bg-slate-900 border border-slate-700';
-            result.innerHTML = `<span class="text-slate-300 inline-flex items-center gap-1.5">${uiIcon('cell-tower', 'h-4 w-4')} Σύνδεση με τον server...</span>`;
+            const sendBtn = document.getElementById('announce-send');
+            if (result) {
+                result.classList.remove('hidden');
+                result.className = 'text-xs rounded p-2 space-y-1 mb-2 bg-slate-900 border border-slate-700';
+                result.innerHTML = `<span class="text-slate-300 inline-flex items-center gap-1.5">${uiIcon('cell-tower', 'h-4 w-4')} Σύνδεση με τον server...</span>`;
+            }
+            if (sendBtn) sendBtn.disabled = true;
+            setTabLoading(true);
 
             try {
                 const { data: { session } } = await supabaseClient.auth.getSession();
@@ -5470,16 +5510,26 @@
                 const total = data.total || (ok + fail);
                 const note = data.note || '';
 
-                result.className = 'text-xs rounded p-2 space-y-1 bg-emerald-900/40 border border-emerald-700/50';
-                result.innerHTML =
-                    `<div class="font-bold text-emerald-200">Αποστολή ολοκληρώθηκε</div>` +
-                    `<div class="text-emerald-100">Επιτυχείς: <b>${Number(ok)}</b> • Αποτυχίες: <b>${Number(fail)}</b> • Σύνολο: <b>${Number(total)}</b></div>` +
-                    (note ? `<div class="text-[11px] text-emerald-200/80 mt-1 italic">${escapeHtml(note)}</div>` : '') +
-                    ((data && data.failed_details && data.failed_details.length) ?
-                        `<div class="mt-1 text-[10px] text-emerald-100/80 max-h-16 overflow-auto">Αποτυχίες: ${escapeHtml(data.failed_details.map(x => `${x.email} (${x.reason})`).join(', '))}</div>` : '');
+                if (result) {
+                    result.className = 'text-xs rounded p-2 space-y-1 mb-2 bg-emerald-900/40 border border-emerald-700/50';
+                    result.innerHTML =
+                        `<div class="font-bold text-emerald-200">Αποστολή ολοκληρώθηκε</div>` +
+                        `<div class="text-emerald-100">Επιτυχείς: <b>${Number(ok)}</b> • Αποτυχίες: <b>${Number(fail)}</b> • Σύνολο: <b>${Number(total)}</b></div>` +
+                        (note ? `<div class="text-[11px] text-emerald-200/80 mt-1 italic">${escapeHtml(note)}</div>` : '') +
+                        ((data && data.failed_details && data.failed_details.length) ?
+                            `<div class="mt-1 text-[10px] text-emerald-100/80 max-h-16 overflow-auto">Αποτυχίες: ${escapeHtml(data.failed_details.map(x => `${x.email} (${x.reason})`).join(', '))}</div>` : '');
+                }
+                if (titleEl) titleEl.value = '';
+                if (bodyEl) bodyEl.value = '';
+                notificationsTabCache = null;
             } catch (e) {
-                result.className = 'text-xs rounded p-2 space-y-1 bg-red-900/40 border border-red-700/50';
-                result.innerHTML = `<div class="font-bold text-red-200">Σφάλμα αποστολής</div><div class="text-red-100">${escapeHtml(e.message)}</div><div class="text-[10px] text-red-200/70 mt-1">Αν το σφάλμα έχει να κάνει με secrets ή VAPID, ελέγξτε τα Secrets στο Edge Function.</div>`;
+                if (result) {
+                    result.className = 'text-xs rounded p-2 space-y-1 mb-2 bg-red-900/40 border border-red-700/50';
+                    result.innerHTML = `<div class="font-bold text-red-200">Σφάλμα αποστολής</div><div class="text-red-100">${escapeHtml(e.message)}</div><div class="text-[10px] text-red-200/70 mt-1">Αν το σφάλμα έχει να κάνει με secrets ή VAPID, ελέγξτε τα Secrets στο Edge Function.</div>`;
+                }
+            } finally {
+                if (sendBtn) sendBtn.disabled = false;
+                setTabLoading(false);
             }
         }
 
@@ -5705,7 +5755,7 @@
             }
 
             content.innerHTML = `
-                <div class="flex items-center justify-between mb-4">
+                <div class="tab-sticky flex items-center justify-between mb-4">
                     <h2 class="text-2xl font-bold">Το Προφίλ μου</h2>
                 </div>
                 <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 space-y-3 mb-4">
