@@ -195,11 +195,6 @@
             background: #0f172a;
             padding-bottom: 0.75rem;
         }
-        html.tablet-shell .tab-tools {
-            position: sticky;
-            top: 0;
-            z-index: 3;
-        }
         .tab-action {
             display: inline-flex;
             align-items: center;
@@ -209,21 +204,26 @@
             font-size: 0.75rem;
             line-height: 1;
             font-weight: 600;
-            background: #4f46e5;
-            color: #fff;
+            background: #334155;
+            color: #f1f5f9;
+            border: 1px solid #64748b;
             flex-shrink: 0;
         }
         .tab-action:hover {
-            background: #6366f1;
+            background: #475569;
         }
         .tab-action-new {
             background: #059669;
+            border-color: #059669;
+            color: #fff;
         }
         .tab-action-new:hover {
             background: #10b981;
+            border-color: #10b981;
         }
         .tab-action-danger {
             background: rgba(185, 28, 28, 0.92);
+            border-color: rgba(185, 28, 28, 0.92);
             color: #fecaca;
         }
         .tab-action-danger:hover {
@@ -1260,6 +1260,28 @@
 
         function syncTabletShell() {
             document.documentElement.classList.toggle('tablet-shell', isTabletShell());
+            placePinnedTools();
+        }
+
+        function isPhoneLandscape() {
+            return !isTabletShell() && window.matchMedia('(orientation: landscape)').matches;
+        }
+
+        function placePinnedTools() {
+            const content = document.getElementById('content');
+            if (!content) return;
+            const sticky = content.querySelector('.tab-sticky');
+            const scroll = content.querySelector('.tab-scroll');
+            if (!sticky || !scroll) return;
+            content.querySelectorAll('.tab-tools[data-pin]').forEach((tools) => {
+                const mode = tools.getAttribute('data-pin');
+                const pin = mode === 'tablet-only' ? isTabletShell() : !isPhoneLandscape();
+                if (pin) {
+                    if (tools.parentElement !== sticky) sticky.appendChild(tools);
+                } else if (tools.parentElement !== scroll) {
+                    scroll.insertBefore(tools, scroll.firstChild);
+                }
+            });
         }
 
         function isIosDevice() {
@@ -2991,9 +3013,7 @@
                         <p class="text-xs text-indigo-300">${escapeHtml(instrumentLine)}</p>
                     </div>
                 </div>
-                </div>
-                <div class="tab-scroll">
-                <div class="tab-tools">
+                <div class="tab-tools" data-pin="except-phone-landscape">
                 <p id="music-offline-banner" class="${options.fromOfflineCache ? '' : 'hidden '}text-[11px] text-amber-200/90 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2 mb-3">Χωρίς σύνδεση — ανοίγουν μόνο όσες παρτιτούρες έχουν ήδη αποθηκευτεί σε αυτή τη συσκευή.</p>
                 <div class="bg-slate-800 p-3 rounded-xl border border-slate-700 mb-0 space-y-2">
                     <div class="relative">
@@ -3021,6 +3041,8 @@
                     <div id="music-sync-status" class="text-[11px] text-indigo-300 pt-1"></div>
                 </div>
                 </div>
+                </div>
+                <div class="tab-scroll">
                 <div id="music-results"></div>
             `;
 
@@ -3054,6 +3076,7 @@
             html += '</div>';
 
             content.innerHTML = html;
+            placePinnedTools();
             const search = document.getElementById('mf-search');
             const searchClear = document.getElementById('mf-search-clear');
             const syncSearchClear = () => {
@@ -4610,7 +4633,7 @@
             `;
 
             if (eventsViewMode === 'calendar') {
-                html += `<div class="tab-tools">` + renderCalendarGrid(events);
+                html += `<div class="tab-tools" data-pin="tablet-only">` + renderCalendarGrid(events);
             }
 
             let displayedEvents = events || [];
@@ -4724,6 +4747,7 @@
             html += '</div>';
 
             content.innerHTML = html;
+            placePinnedTools();
         }
 
         // --- ATTENDANCE TAB (Fixed to map first_name + last_name correctly) ---
@@ -4783,12 +4807,10 @@
             let html = (stale ? staleSnapshotBanner() : '') + `
                 <div class="tab-sticky mb-2">
                     <h2 class="text-2xl font-bold">Παρουσίες</h2>
+                    ${isAdmin ? `<p class="text-xs text-slate-400 mt-1 mb-2">Συγκεντρωτική κατάσταση παρουσιών</p>
+                <button type="button" id="attendance-export-btn" onclick="exportAttendanceWorkbook()" class="w-full bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 disabled:pointer-events-none text-white py-2 rounded-lg text-xs font-semibold">Εξαγωγή παρουσιών (*.xlsx)</button>` : ''}
                 </div>
                 <div class="tab-scroll">
-                    ${isAdmin ? `<div class="tab-tools">
-                    <p class="text-xs text-slate-400 mb-2">Συγκεντρωτική κατάσταση παρουσιών</p>
-                <button type="button" id="attendance-export-btn" onclick="exportAttendanceWorkbook()" class="w-full bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 disabled:pointer-events-none text-white py-2 rounded-lg text-xs font-semibold">Εξαγωγή παρουσιών (*.xlsx)</button>
-                </div>` : ''}
             `;
             
             if (isAdmin) {
