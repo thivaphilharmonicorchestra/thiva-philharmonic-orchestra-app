@@ -176,11 +176,12 @@
         #content:not(:has(.tab-scroll)) {
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
+            padding-bottom: calc(5.75rem + env(safe-area-inset-bottom, 0px));
         }
         .tab-sticky {
             flex-shrink: 0;
             background: #0f172a;
-            padding-bottom: 0.5rem;
+            padding-bottom: 0.35rem;
         }
         .tab-scroll {
             flex: 1 1 auto;
@@ -188,6 +189,16 @@
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
             overscroll-behavior: none;
+            padding-bottom: calc(5.75rem + env(safe-area-inset-bottom, 0px));
+        }
+        .tab-tools {
+            background: #0f172a;
+            padding-bottom: 0.75rem;
+        }
+        html.tablet-shell .tab-tools {
+            position: sticky;
+            top: 0;
+            z-index: 3;
         }
         .tab-action {
             display: inline-flex;
@@ -204,6 +215,20 @@
         }
         .tab-action:hover {
             background: #6366f1;
+        }
+        .tab-action-new {
+            background: #059669;
+        }
+        .tab-action-new:hover {
+            background: #10b981;
+        }
+        .tab-action-danger {
+            background: rgba(185, 28, 28, 0.92);
+            color: #fecaca;
+        }
+        .tab-action-danger:hover {
+            background: #dc2626;
+            color: #fff;
         }
         .chrome-close {
             display: inline-flex;
@@ -308,7 +333,8 @@
         #pdf-viewer-container > .viewer-float:not(#viewer-show-controls) {
             top: calc(env(safe-area-inset-top, 0px) + 12px);
         }
-        html.install-nudge-on #content {
+        html.install-nudge-on .tab-scroll,
+        html.install-nudge-on #content:not(:has(.tab-scroll)) {
             padding-bottom: 13rem;
         }
         #install-nudge {
@@ -552,7 +578,7 @@
         <div id="tab-switch-progress" aria-hidden="true"></div>
         
         <!-- DYNAMIC CONTENT AREA -->
-        <div id="content" class="flex-1 pb-20">
+        <div id="content" class="flex-1">
             <!-- Loaded dynamically via JavaScript -->
         </div>
 
@@ -2679,37 +2705,33 @@
             let html = stale ? staleSnapshotBanner() : '';
             html += `<div class="tab-sticky">`;
             html += `
-                <div class="flex items-center justify-between mb-5">
-                    <div>
-                        <p class="text-sm text-slate-400">Καλώς ήρθες,</p>
-                        <h1 class="text-2xl font-bold text-white">${escapeHtml(vocativeFirstName)}!</h1>
-                    </div>
+                <div class="mb-3">
+                    <p class="text-sm text-slate-400">Καλώς ήρθες,</p>
+                    <h1 class="text-2xl font-bold text-white">${escapeHtml(vocativeFirstName)}!</h1>
                 </div>
+                <div class="flex items-center justify-between gap-2 mb-1">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <h2 class="text-lg font-bold">Τελευταίες ανακοινώσεις</h2>
+                        ${isPrivilegedRole() && navigator.onLine !== false ? `<button type="button" onclick="openAnnouncementComposer()" class="tab-action tab-action-new">Νέα</button>` : ''}
+                    </div>
+                    <button type="button" onclick="switchTab('notifications')" class="tab-action">Όλες</button>
+                </div>
+            </div>
             `;
-
+            html += '<div class="tab-scroll">';
             if (nextEvent) {
                 html += `
-                    <section class="bg-gradient-to-br from-indigo-700 to-indigo-900 p-4 rounded-2xl shadow-lg mb-4">
+                    <div class="tab-tools">
+                    <section class="bg-gradient-to-br from-indigo-700 to-indigo-900 p-4 rounded-2xl shadow-lg">
                         <p class="text-xs text-indigo-200 font-semibold tracking-wide">ΕΠΟΜΕΝΗ ΕΚΔΗΛΩΣΗ</p>
                         <h2 class="text-xl font-bold text-white mt-1">${escapeHtml(nextEvent.event_name)}</h2>
                         <p class="text-sm text-indigo-100 mt-2">${uiIconText('calendar-dots', `${escapeHtml(formatGreekDateOnly(nextEvent.date))}${nextEvent.time ? ` · ${escapeHtml(formatEventTime(nextEvent.time))}` : ''}`)}</p>
                         ${nextEvent.location ? `<p class="text-xs text-indigo-200 mt-1">${uiIconText('map-pin', formatEventLocation(nextEvent.location))}</p>` : ''}
                         <button onclick="switchTab('events')" class="mt-3 bg-white/15 hover:bg-white/25 px-3 py-2 rounded-lg text-xs font-semibold text-white">Προβολή προγράμματος</button>
                     </section>
+                    </div>
                 `;
             }
-
-            html += `
-                <div class="flex items-center justify-between gap-2 mb-2">
-                    <h2 class="text-lg font-bold">Τελευταίες ανακοινώσεις</h2>
-                    <div class="flex items-center gap-2 shrink-0">
-                        ${isPrivilegedRole() && navigator.onLine !== false ? `<button type="button" onclick="openAnnouncementComposer()" class="tab-action">Νέα</button>` : ''}
-                        <button type="button" onclick="switchTab('notifications')" class="tab-action">Όλες</button>
-                    </div>
-                </div>
-            </div>
-            `;
-            html += '<div class="tab-scroll">';
             if (!announcements || announcements.length === 0) {
                 html += '<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">Δεν υπάρχουν ανακοινώσεις ακόμα.</div>';
             } else {
@@ -2801,11 +2823,11 @@
 
             let html = (stale ? staleSnapshotBanner() : '') + `
                 <div class="tab-sticky flex items-center justify-between gap-2 mb-3">
-                    <h2 class="text-2xl font-bold">Ανακοινώσεις</h2>
-                    <div class="flex items-center gap-2 shrink-0">
-                        ${isPrivilegedRole() && navigator.onLine !== false ? `<button type="button" onclick="openAnnouncementComposer()" class="tab-action">Νέα</button>` : ''}
-                        <button type="button" onclick="switchTab('home')" class="chrome-close" aria-label="Κλείσιμο">×</button>
+                    <div class="flex items-center gap-2 min-w-0">
+                        <h2 class="text-2xl font-bold">Ανακοινώσεις</h2>
+                        ${isPrivilegedRole() && navigator.onLine !== false ? `<button type="button" onclick="openAnnouncementComposer()" class="tab-action tab-action-new">Νέα</button>` : ''}
                     </div>
+                    <button type="button" onclick="switchTab('home')" class="chrome-close" aria-label="Κλείσιμο">×</button>
                 </div>
                 <div class="tab-scroll">
             `;
@@ -2823,7 +2845,7 @@
                                     <h3 class="font-bold text-base text-white">${escapeHtml(item.title)}</h3>
                                     <p class="text-xs text-slate-500 mt-1">${escapeHtml(date)}</p>
                                 </div>
-                                ${isPrivilegedRole() ? `<button onclick="deleteAnnouncement(${Number(item.id)})" class="shrink-0 text-red-400 hover:text-red-300 text-xs underline">Διαγραφή</button>` : ''}
+                                ${isPrivilegedRole() ? `<button type="button" onclick="deleteAnnouncement(${Number(item.id)})" class="tab-action tab-action-danger">Διαγραφή</button>` : ''}
                             </div>
                             <p class="text-sm text-slate-200 mt-3 whitespace-pre-wrap">${escapeHtml(item.body)}</p>
                         </article>
@@ -2962,13 +2984,16 @@
             const { allSets, partNames } = filteredMusicRows();
 
             let html = `
-                <div class="tab-sticky mb-3">
-                <div class="flex items-center justify-between mb-3">
+                <div class="tab-sticky mb-2">
+                <div class="flex items-center justify-between">
                     <div>
                         <h2 class="text-2xl font-bold">Παρτιτούρες</h2>
                         <p class="text-xs text-indigo-300">${escapeHtml(instrumentLine)}</p>
                     </div>
                 </div>
+                </div>
+                <div class="tab-scroll">
+                <div class="tab-tools">
                 <p id="music-offline-banner" class="${options.fromOfflineCache ? '' : 'hidden '}text-[11px] text-amber-200/90 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2 mb-3">Χωρίς σύνδεση — ανοίγουν μόνο όσες παρτιτούρες έχουν ήδη αποθηκευτεί σε αυτή τη συσκευή.</p>
                 <div class="bg-slate-800 p-3 rounded-xl border border-slate-700 mb-0 space-y-2">
                     <div class="relative">
@@ -2996,7 +3021,6 @@
                     <div id="music-sync-status" class="text-[11px] text-indigo-300 pt-1"></div>
                 </div>
                 </div>
-                <div class="tab-scroll">
                 <div id="music-results"></div>
             `;
 
@@ -4571,8 +4595,8 @@
             eventsTabCache = { events: events || [], responses: responses || [] };
 
             let html = (stale ? staleSnapshotBanner() : '') + `
-                <div class="tab-sticky mb-3">
-                <div class="flex justify-between items-center mb-3">
+                <div class="tab-sticky mb-2">
+                <div class="flex justify-between items-center">
                     <div class="flex items-center space-x-2">
                         <h2 class="text-2xl font-bold">Πρόγραμμα</h2>
                     </div>
@@ -4581,23 +4605,25 @@
                         <button onclick="setEventsView('calendar')" class="px-3 py-1 rounded text-xs font-medium transition ${eventsViewMode === 'calendar' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}">Ημερολόγιο</button>
                     </div>
                 </div>
+                </div>
+                <div class="tab-scroll">
             `;
 
             if (eventsViewMode === 'calendar') {
-                html += renderCalendarGrid(events);
+                html += `<div class="tab-tools">` + renderCalendarGrid(events);
             }
 
             let displayedEvents = events || [];
             if (eventsViewMode === 'calendar' && selectedCalendarDate) {
                 displayedEvents = displayedEvents.filter(ev => ev.date === selectedCalendarDate);
                 html += `
-                    <div class="flex justify-between items-center bg-slate-800/60 p-2.5 rounded-lg border border-slate-700 mb-3 text-xs">
+                    <div class="flex justify-between items-center bg-slate-800/60 p-2.5 rounded-lg border border-slate-700 mb-0 text-xs">
                         <span class="text-indigo-300 inline-flex items-center gap-1">${uiIcon('calendar-dots')} Προβολή ημέρας: <b>${formatGreekDateOnly(selectedCalendarDate)}</b></span>
                         <button onclick="selectedCalendarDate = null; renderEventsTab();" class="text-slate-400 hover:text-white underline">Εμφάνιση όλων</button>
                     </div>
                 `;
             }
-            html += `</div><div class="tab-scroll">`;
+            if (eventsViewMode === 'calendar') html += `</div>`;
 
             if (!displayedEvents || displayedEvents.length === 0) {
                 html += `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">Δεν υπάρχουν προγραμματισμένες εκδηλώσεις.</div>`;
@@ -4757,10 +4783,12 @@
             let html = (stale ? staleSnapshotBanner() : '') + `
                 <div class="tab-sticky mb-2">
                     <h2 class="text-2xl font-bold">Παρουσίες</h2>
-                    ${isAdmin ? `<p class="text-xs text-slate-400 mt-1 mb-2">Συγκεντρωτική κατάσταση παρουσιών</p>
-                <button type="button" id="attendance-export-btn" onclick="exportAttendanceWorkbook()" class="w-full bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 disabled:pointer-events-none text-white py-2 rounded-lg text-xs font-semibold">Εξαγωγή παρουσιών (*.xlsx)</button>` : ''}
                 </div>
                 <div class="tab-scroll">
+                    ${isAdmin ? `<div class="tab-tools">
+                    <p class="text-xs text-slate-400 mb-2">Συγκεντρωτική κατάσταση παρουσιών</p>
+                <button type="button" id="attendance-export-btn" onclick="exportAttendanceWorkbook()" class="w-full bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 disabled:pointer-events-none text-white py-2 rounded-lg text-xs font-semibold">Εξαγωγή παρουσιών (*.xlsx)</button>
+                </div>` : ''}
             `;
             
             if (isAdmin) {
@@ -5517,7 +5545,7 @@
             const edgeFnOK = !!(PUSH_EDGE_FUNCTION_URL && PUSH_EDGE_FUNCTION_URL.length > 20);
             const dialog = document.createElement('div');
             dialog.id = 'announce-composer';
-            dialog.className = 'fixed z-[10002] bg-black/60 flex items-end sm:items-center justify-center p-4';
+            dialog.className = 'fixed z-[10002] bg-black/60 flex items-start justify-center p-4 pt-6';
             dialog.style.inset = '0';
             dialog.innerHTML = `
                 <div class="bg-slate-800 border border-slate-600 rounded-2xl p-4 w-full max-w-sm max-h-full overflow-y-auto flex flex-col">
@@ -5527,10 +5555,10 @@
                     </div>
                     <p class="text-[11px] text-slate-400 mb-2 shrink-0">Στέλνεται ως ειδοποίηση σε όσους την έχουν ενεργοποιήσει, και εμφανίζεται στις Ανακοινώσεις.</p>
                     <div id="push-sub-count" class="text-[11px] text-slate-400 bg-slate-900/60 border border-slate-700/60 rounded p-2 mb-2 shrink-0">Φόρτωση αριθμού συνδρομητών...</div>
-                    <input id="push-title" type="text" placeholder="Τίτλος (π.χ., Νέα Πρόβα)"
+                    <input id="push-title" type="text" inputmode="text" enterkeyhint="next" autocomplete="off" placeholder="Τίτλος (π.χ., Νέα Πρόβα)"
                         class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white shrink-0">
-                    <textarea id="push-body" rows="6" placeholder="Μήνυμα"
-                        class="w-full mb-3 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white resize-y min-h-[8rem] max-h-[40vh] overflow-y-auto"></textarea>
+                    <textarea id="push-body" rows="4" placeholder="Μήνυμα"
+                        class="w-full mb-3 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white resize-y min-h-[6rem] max-h-[28vh] overflow-y-auto"></textarea>
                     <div id="push-result" class="hidden text-xs rounded p-2 space-y-1 mb-2"></div>
                     <button type="button" id="announce-send" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-lg text-sm font-bold shrink-0">Αποστολή ειδοποίησης</button>
                     ${(!vapidOK || !edgeFnOK) ? `<p class="text-[10px] text-amber-300 mt-2">VAPID: ${vapidOK ? 'ορισμένο' : 'λείπει'} · Edge: ${edgeFnOK ? 'ορισμένο' : 'λείπει URL'}</p>` : ''}
@@ -5542,12 +5570,9 @@
             dialog.querySelector('#announce-send').onclick = sendAdminAnnouncementDirect;
             document.body.appendChild(dialog);
             bindComposerToKeyboard(dialog);
-            setTimeout(loadSubscriberCount, 10);
             const titleEl = dialog.querySelector('#push-title');
-            setTimeout(() => {
-                titleEl?.focus({ preventScroll: true });
-                bindComposerToKeyboard(dialog);
-            }, 50);
+            titleEl?.focus();
+            setTimeout(loadSubscriberCount, 10);
         }
 
         async function sendAdminAnnouncementDirect() {
