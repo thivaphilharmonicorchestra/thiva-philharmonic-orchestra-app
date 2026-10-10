@@ -855,16 +855,39 @@
             if (!currentUser?.id) return false;
             const snap = await scoresGetMeta(currentUser.id);
             cachedGreetingName = snap?.greetingName || snap?.profile?.first_name || snap?.profile?.name || snap?.tabs?.home?.firstName || cachedGreetingName;
-            if (!snap?.profile) return false;
-            currentProfile = snap.profile;
-            assignmentDirectory = Array.isArray(snap.assignmentDirectory)
-                ? snap.assignmentDirectory
-                : (currentProfile.assignments || []);
-            if (Array.isArray(snap.library) && snap.library.length && !musicLibraryCache.length) {
+            cachedGreetingLastName = snap?.lastName || snap?.profile?.last_name || cachedGreetingLastName;
+            cachedProfileRole = snap?.role || snap?.profile?.role || cachedProfileRole;
+            if (Array.isArray(snap?.library) && snap.library.length && !musicLibraryCache.length) {
                 musicLibraryCache = snap.library;
             }
-            cachedGreetingName = snap.greetingName || snap.profile?.first_name || snap.profile?.name || snap.tabs?.home?.firstName || cachedGreetingName;
-            return true;
+            assignmentDirectory = Array.isArray(snap?.assignmentDirectory)
+                ? snap.assignmentDirectory
+                : (snap?.profile?.assignments || assignmentDirectory || []);
+            if (snap?.profile) {
+                currentProfile = snap.profile;
+            } else {
+                const synthesized = {
+                    ...(currentProfile || {}),
+                    email: currentProfile?.email || currentUser.email,
+                    first_name: currentProfile?.first_name || cachedGreetingName || '',
+                    last_name: currentProfile?.last_name || cachedGreetingLastName || '',
+                    role: currentProfile?.role || cachedProfileRole || 'musician',
+                    assignments: (currentProfile?.assignments?.length ? currentProfile.assignments : assignmentDirectory) || []
+                };
+                if (synthesized.first_name || synthesized.last_name || synthesized.email) {
+                    currentProfile = synthesized;
+                }
+            }
+            if (currentProfile && !currentProfile.assignments?.length && assignmentDirectory.length) {
+                const pid = currentProfile.id;
+                currentProfile.assignments = pid
+                    ? assignmentDirectory.filter((row) => !row.user_id || row.user_id === pid)
+                    : assignmentDirectory;
+            }
+            if (currentProfile?.first_name) cachedGreetingName = currentProfile.first_name;
+            if (currentProfile?.last_name) cachedGreetingLastName = currentProfile.last_name;
+            if (currentProfile?.role) cachedProfileRole = currentProfile.role;
+            return !!currentProfile;
         }
 
         function greetingFirstName() {
@@ -876,15 +899,37 @@
             return (cachedGreetingName || '').trim();
         }
 
+        function greetingLastName() {
+            const live = (currentProfile?.last_name || '').trim();
+            if (live) {
+                cachedGreetingLastName = live;
+                return live;
+            }
+            return (cachedGreetingLastName || '').trim();
+        }
+
         async function persistOfflineSessionSnapshot(extra = {}) {
-            if (!currentUser?.id || !currentProfile) return;
+            if (!currentUser?.id) return;
+            const hasIdentity = !!(currentProfile && (currentProfile.id || currentProfile.first_name || currentProfile.last_name));
+            if (!hasIdentity) {
+                if (Object.keys(extra).length) await scoresPutMeta(currentUser.id, extra);
+                return;
+            }
             const greetingName = greetingFirstName();
-            await scoresPutMeta(currentUser.id, {
+            const lastName = greetingLastName();
+            cachedProfileRole = currentProfile.role || cachedProfileRole;
+            const patch = {
                 profile: currentProfile,
-                greetingName,
-                assignmentDirectory: currentProfile.assignments || assignmentDirectory || [],
+                role: currentProfile.role || cachedProfileRole,
                 ...extra
-            });
+            };
+            if (greetingName) patch.greetingName = greetingName;
+            if (lastName) patch.lastName = lastName;
+            const directory = currentProfile.assignments?.length
+                ? currentProfile.assignments
+                : assignmentDirectory;
+            if (Array.isArray(directory) && directory.length) patch.assignmentDirectory = directory;
+            await scoresPutMeta(currentUser.id, patch);
         }
 
         function staleSnapshotBanner() {
@@ -1231,6 +1276,8 @@
         let regulationsMetaCache = { date: '', path: '' };
         let adminAssignmentsHtmlCache = '';
         let cachedGreetingName = '';
+        let cachedGreetingLastName = '';
+        let cachedProfileRole = '';
         let pdfScratchCanvas = null; 
 
         let pdfDoc = null;
@@ -1785,6 +1832,8 @@
                     regulationsMetaCache = { date: '', path: '' };
                     adminAssignmentsHtmlCache = '';
                     cachedGreetingName = '';
+                    cachedGreetingLastName = '';
+                    cachedProfileRole = '';
                     offlinePdfPieceIds = new Set();
                     offlinePdfLinks = {};
                     musicTabShellReady = false;
@@ -2141,11 +2190,15 @@
                 return;
             }
             try {
-            let { data } = await supabaseClient
+            let { data, error: profileByIdError } = await supabaseClient
                 .from('profiles')
                 .select('*')
                 .eq('id', currentUser.id)
                 .maybeSingle();
+            if (profileByIdError && isOfflineFetchError(profileByIdError)) {
+                await restoreOfflineSessionSnapshot();
+                return;
+            }
 
             const candidates = [];
             if (data) candidates.push(data);
@@ -2169,15 +2222,20 @@
             } else if (candidates[0]) {
                 currentProfile = candidates[0];
             } else {
-                currentProfile = { email: currentUser.email, role: 'musician', instrument: 'Μη ορισμένο' };
+                await restoreOfflineSessionSnapshot();
+                if (!currentProfile?.id && !currentProfile?.first_name && !currentProfile?.last_name) {
+                    currentProfile = { email: currentUser.email, role: cachedProfileRole || 'musician', instrument: 'Μη ορισμένο' };
+                }
             }
 
-            assignmentDirectory = [];
-            if (candidateIds.length) {
+            if (candidateIds.length && (data || candidates.length)) {
                 let assignments = [];
                 const withNames = await supabaseClient
                     .from('user_instruments')
                     .select('user_id, instrument_id, part_position, concert_set, instruments(name, is_section, is_percussion)');
+                if (withNames.error && isOfflineFetchError(withNames.error) && !currentProfile?.first_name) {
+                    await restoreOfflineSessionSnapshot();
+                }
                 if (!withNames.error) {
                     assignmentDirectory = withNames.data || [];
                     assignments = assignmentDirectory.filter(row => candidateIds.includes(row.user_id));
@@ -2211,13 +2269,19 @@
                 });
                 if (ranked[0]) currentProfile = ranked[0];
                 const profileId = currentProfile?.id;
-                currentProfile.assignments = profileId
-                    ? assignments.filter(row => !row.user_id || row.user_id === profileId)
-                    : assignments;
-            } else {
+                if (assignments.length || (!withNames.error && Array.isArray(withNames.data))) {
+                    currentProfile.assignments = profileId
+                        ? assignments.filter(row => !row.user_id || row.user_id === profileId)
+                        : assignments;
+                } else if (!currentProfile.assignments?.length) {
+                    currentProfile.assignments = [];
+                }
+            } else if (!currentProfile.assignments) {
                 currentProfile.assignments = [];
             }
-            await persistOfflineSessionSnapshot();
+            if (currentProfile?.id || currentProfile?.first_name || currentProfile?.last_name) {
+                await persistOfflineSessionSnapshot();
+            }
             } catch (e) {
                 console.warn('fetchProfile', e);
                 await restoreOfflineSessionSnapshot();
@@ -2283,11 +2347,11 @@
         }
 
         function isAdminRole() {
-            return profileHasAdminRole(currentProfile);
+            return profileHasAdminRole(currentProfile) || foldedProfileRole({ role: cachedProfileRole }) === 'admin';
         }
 
         function isConductorRole() {
-            return profileHasConductorRole(currentProfile);
+            return profileHasConductorRole(currentProfile) || profileHasConductorRole({ role: cachedProfileRole });
         }
 
         function foldedProfileRole(profile) {
@@ -5921,11 +5985,14 @@
 
         async function renderProfileTab() {
             const content = document.getElementById('content');
+            if (!currentProfile?.first_name || !currentProfile?.last_name) {
+                await restoreOfflineSessionSnapshot();
+            }
             const paintProfile = (regulationsUpdated, adminAssignmentsHtml) => {
             if (activeTab !== 'profile') return;
             const roleDisplay = isAdminRole() ? 'Διαχειριστής' : (isConductorRole() ? 'Μαέστρος' : 'Μουσικός');
-            const firstName = currentProfile?.first_name || currentProfile?.name || '';
-            const lastName = currentProfile?.last_name || '';
+            const firstName = (currentProfile?.first_name || currentProfile?.name || greetingFirstName() || '').trim();
+            const lastName = greetingLastName();
             const instrument = assignmentLabels().join(', ')
                 || (isConductorRole() ? 'Μαέστρος' : '')
                 || (isAdminRole() ? 'Διαχειριστής' : '')
@@ -6017,6 +6084,7 @@
                 regulationsMetaCache.date ? `Τελευταία ενημέρωση: ${regulationsMetaCache.date}` : 'Τελευταία ενημέρωση: —',
                 isAdminRole() ? (adminAssignmentsHtmlCache || (navigator.onLine === false ? adminAssignmentsOfflineNotice() : '')) : ''
             );
+            if (navigator.onLine === false) return;
             let latestRegulations = null;
             let adminAssignmentsHtml = isAdminRole() ? (adminAssignmentsHtmlCache || '') : '';
             try {
