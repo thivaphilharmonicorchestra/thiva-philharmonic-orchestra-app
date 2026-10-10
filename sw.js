@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'thiva-philharmonic-v116';
+const CACHE_VERSION = 'thiva-philharmonic-v117';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PUSH_OPEN_CACHE = 'thiva-philharmonic-push-open';
 
@@ -7,6 +7,7 @@ const STATIC_ASSETS = [
     './index.html',
     './thiva_app_icon.png',
     './thiva_app_icon_android.png',
+    './thiva_boot_icon.png',
     './thiva_home_button.png',
     './manifest.webmanifest',
     './vendor/tailwind.js',
