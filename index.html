@@ -4,8 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <meta name="theme-color" content="#0f172a">
+    <meta name="color-scheme" content="dark">
     <style>
-        html, body { background: #0f172a; color: #e2e8f0; margin: 0; height: 100%; }
+        html, body { background: #0f172a; color: #e2e8f0; margin: 0; height: 100%; color-scheme: dark; }
         #need-network {
             display: none;
             position: fixed;
@@ -52,10 +53,11 @@
     <!-- PWA / Native App Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="Φιλαρμονική Θήβας">
     <link rel="apple-touch-icon" href="./thiva_app_icon.png">
     <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1170x2532.png">
     <link rel="apple-touch-startup-image" href="./splash/splash-1290x2796.png" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
     <link rel="apple-touch-startup-image" href="./splash/splash-2796x1290.png" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)">
     <link rel="apple-touch-startup-image" href="./splash/splash-1179x2556.png" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
@@ -634,7 +636,7 @@
 <body class="bg-slate-900 text-slate-100 h-full overflow-hidden flex flex-col">
 
     <div id="need-network" class="is-on boot" role="alert">
-        <img src="./thiva_app_icon.png" alt="">
+        <img src="./thiva_boot_icon.png" alt="">
         <div class="boot-bar" aria-hidden="true"></div>
         <h1>Φιλαρμονική Ορχήστρα Θήβας</h1>
         <p id="need-network-msg">Φόρτωση...</p>
@@ -6053,21 +6055,49 @@
                 isAdminRole() ? buildAdminAssignmentPanel() : Promise.resolve('')
             ]);
             if (latestRegulations && !latestRegulations.error) regulationsMetaCache = latestRegulations;
-            if (isAdminRole()) adminAssignmentsHtmlCache = adminAssignmentsHtml || '';
+            if (isAdminRole() && navigator.onLine !== false && adminAssignmentsHtml && !adminAssignmentsHtml.includes('data-offline-assign')) {
+                adminAssignmentsHtmlCache = adminAssignmentsHtml;
+            }
             paintProfile(
                 regulationsMetaCache.date ? `Τελευταία ενημέρωση: ${regulationsMetaCache.date}` : 'Τελευταία ενημέρωση: —',
                 isAdminRole() ? adminAssignmentsHtmlCache : ''
             );
         }
 
+        function adminAssignmentsOfflineNotice() {
+            return `<div data-offline-assign="1" class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4 text-slate-400 text-xs">Η υπηρεσία αναθέσεων θα είναι διαθέσιμη όταν συνδεθείτε στο δίκτυο.</div>`;
+        }
+
+        function isOfflineFetchError(err) {
+            const msg = String(err?.message || err || '');
+            return navigator.onLine === false || /failed to fetch|networkerror|load failed/i.test(msg);
+        }
+
         async function buildAdminAssignmentPanel() {
-            const [{ data: people, error: peopleError }, { data: instruments, error: insError }, { data: rows, error: rowsError }] = await Promise.all([
-                supabaseClient.from('profiles').select('id, email, first_name, last_name, role').order('last_name'),
-                supabaseClient.from('instruments').select('id, name, max_regular_parts, sort_order, is_section').order('sort_order'),
-                supabaseClient.from('user_instruments').select('id, user_id, instrument_id, part_position, concert_set, instruments(name)')
-            ]);
+            if (navigator.onLine === false) {
+                return adminAssignmentsHtmlCache || adminAssignmentsOfflineNotice();
+            }
+            let people, instruments, rows, peopleError, insError, rowsError;
+            try {
+                const loaded = await Promise.all([
+                    supabaseClient.from('profiles').select('id, email, first_name, last_name, role').order('last_name'),
+                    supabaseClient.from('instruments').select('id, name, max_regular_parts, sort_order, is_section').order('sort_order'),
+                    supabaseClient.from('user_instruments').select('id, user_id, instrument_id, part_position, concert_set, instruments(name)')
+                ]);
+                people = loaded[0].data;
+                peopleError = loaded[0].error;
+                instruments = loaded[1].data;
+                insError = loaded[1].error;
+                rows = loaded[2].data;
+                rowsError = loaded[2].error;
+            } catch (e) {
+                if (isOfflineFetchError(e)) return adminAssignmentsHtmlCache || adminAssignmentsOfflineNotice();
+                return `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4 text-red-400 text-xs">Σφάλμα φόρτωσης αναθέσεων: ${escapeHtml(e.message || String(e))}</div>`;
+            }
             if (peopleError || insError || rowsError) {
-                return `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4 text-red-400 text-xs">Σφάλμα φόρτωσης αναθέσεων: ${escapeHtml((peopleError || insError || rowsError).message)}</div>`;
+                const err = peopleError || insError || rowsError;
+                if (isOfflineFetchError(err)) return adminAssignmentsHtmlCache || adminAssignmentsOfflineNotice();
+                return `<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4 text-red-400 text-xs">Σφάλμα φόρτωσης αναθέσεων: ${escapeHtml(err.message)}</div>`;
             }
             window.adminAssignmentPeople = people || [];
             window.adminAssignmentInstruments = (instruments || []).filter(ins => ins.name !== 'Full Score');
