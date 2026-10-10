@@ -3,6 +3,48 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <meta name="theme-color" content="#0f172a">
+    <style>
+        html, body { background: #0f172a; color: #e2e8f0; margin: 0; height: 100%; }
+        #need-network {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 24px;
+            background: #0f172a;
+            color: #e2e8f0;
+            box-sizing: border-box;
+        }
+        #need-network.is-on { display: flex; }
+        #need-network img { width: 96px; height: 96px; object-fit: contain; margin-bottom: 16px; }
+        #need-network.boot img { margin-bottom: 28px; }
+        #need-network.boot h1,
+        #need-network.boot p,
+        #need-network.boot button { display: none !important; }
+        #need-network .boot-bar {
+            display: none;
+            width: 7.5rem;
+            height: 2px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: #1e293b;
+        }
+        #need-network.boot .boot-bar { display: block; }
+        #need-network.copy .boot-bar { display: none !important; }
+        #need-network .boot-bar::after {
+            content: '';
+            display: block;
+            height: 100%;
+            width: 40%;
+            background: #818cf8;
+            animation: tab-indeterminate 0.85s ease-in-out infinite;
+        }
+    </style>
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>Φιλαρμονική Ορχήστρα Θήβας</title>
     <!-- © Φιλαρμονική Ορχήστρα Θήβας. Source is not a licence to copy the orchestra’s data, name, or PDFs. -->
@@ -14,15 +56,40 @@
     <meta name="apple-mobile-web-app-title" content="Φιλαρμονική Θήβας">
     <link rel="apple-touch-icon" href="./thiva_app_icon.png">
     <link rel="manifest" href="./manifest.webmanifest">
-
-    <script src="./vendor/tailwind.js"></script>
-    <script src="./vendor/supabase.min.js"></script>
-    <script src="./vendor/pdf.min.js"></script>
-    <script src="./vendor/NoSleep.min.js"></script>
-    <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.js';
-    </script>
-    <meta name="theme-color" content="#1e293b">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1290x2796.png" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-2796x1290.png" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1179x2556.png" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-2556x1179.png" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1320x2868.png" media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-2868x1320.png" media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1206x2622.png" media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-2622x1206.png" media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1284x2778.png" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-2778x1284.png" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1170x2532.png" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-2532x1170.png" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1125x2436.png" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-2436x1125.png" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1242x2688.png" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-2688x1242.png" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-828x1792.png" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1792x828.png" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1242x2208.png" media="(device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-2208x1242.png" media="(device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-750x1334.png" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1334x750.png" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-2048x2732.png" media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-2732x2048.png" media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1668x2388.png" media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-2388x1668.png" media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1640x2360.png" media="(device-width: 820px) and (device-height: 1180px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-2360x1640.png" media="(device-width: 820px) and (device-height: 1180px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1620x2160.png" media="(device-width: 810px) and (device-height: 1080px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-2160x1620.png" media="(device-width: 810px) and (device-height: 1080px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1668x2224.png" media="(device-width: 834px) and (device-height: 1112px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-2224x1668.png" media="(device-width: 834px) and (device-height: 1112px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-1536x2048.png" media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="./splash/splash-2048x1536.png" media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)">
     <style>
         .pdf-viewer-container, .modal-content {
             width: 100vw;
@@ -566,8 +633,9 @@
 </head>
 <body class="bg-slate-900 text-slate-100 h-full overflow-hidden flex flex-col">
 
-    <div id="need-network" class="is-on" role="alert">
+    <div id="need-network" class="is-on boot" role="alert">
         <img src="./thiva_app_icon.png" alt="">
+        <div class="boot-bar" aria-hidden="true"></div>
         <h1>Φιλαρμονική Ορχήστρα Θήβας</h1>
         <p id="need-network-msg">Φόρτωση...</p>
         <button type="button" id="need-network-retry" hidden onclick="window.location.reload()">Δοκιμή ξανά</button>
@@ -635,6 +703,13 @@
         <div id="annotation-options" class="annotation-popover viewer-chrome"></div>
     </div>
 
+    <script src="./vendor/tailwind.js"></script>
+    <script src="./vendor/supabase.min.js"></script>
+    <script src="./vendor/pdf.min.js"></script>
+    <script src="./vendor/NoSleep.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.js';
+    </script>
     <!-- JAVASCRIPT APP LOGIC -->
     <script>
         const SUPABASE_URL = 'https://jigwfebaxiqumrltkgli.supabase.co';
@@ -978,9 +1053,14 @@
             const el = document.getElementById('need-network');
             const msg = document.getElementById('need-network-msg');
             const retry = document.getElementById('need-network-retry');
+            const boot = !message || message === 'Φόρτωση...';
             if (msg && message) msg.textContent = message;
-            if (el) el.classList.toggle('is-on', !!on);
-            if (retry) retry.hidden = !on || !message || message === 'Φόρτωση...';
+            if (el) {
+                el.classList.toggle('is-on', !!on);
+                el.classList.toggle('boot', !!on && boot);
+                el.classList.toggle('copy', !!on && !boot);
+            }
+            if (retry) retry.hidden = !on || boot;
         }
 
         function hideNeedNetworkScreen() {
