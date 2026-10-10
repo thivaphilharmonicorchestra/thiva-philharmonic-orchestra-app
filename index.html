@@ -2,7 +2,7 @@
 <html lang="el">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#0f172a">
     <meta name="color-scheme" content="dark">
     <style>
@@ -22,7 +22,7 @@
             box-sizing: border-box;
         }
         #need-network.is-on { display: flex; }
-        #need-network img { width: 96px; height: 96px; object-fit: contain; margin-bottom: 16px; }
+        #need-network img { width: auto; height: auto; max-width: 13.5rem; max-height: 13.5rem; object-fit: contain; margin-bottom: 16px; }
         #need-network.boot img { margin-bottom: 28px; }
         #need-network.boot h1,
         #need-network.boot p,
@@ -192,8 +192,10 @@
             display: flex;
         }
         #need-network img {
-            width: 96px;
-            height: 96px;
+            width: auto;
+            height: auto;
+            max-width: 13.5rem;
+            max-height: 13.5rem;
             object-fit: contain;
             margin-bottom: 16px;
         }
@@ -1422,9 +1424,7 @@
             if (!meta) return;
             meta.setAttribute(
                 'content',
-                cover
-                    ? 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'
-                    : 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no'
+                'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'
             );
             window.scrollTo(0, 0);
         }
@@ -6048,19 +6048,27 @@
             };
             paintProfile(
                 regulationsMetaCache.date ? `Τελευταία ενημέρωση: ${regulationsMetaCache.date}` : 'Τελευταία ενημέρωση: —',
-                isAdminRole() ? adminAssignmentsHtmlCache : ''
+                isAdminRole() ? (adminAssignmentsHtmlCache || (navigator.onLine === false ? adminAssignmentsOfflineNotice() : '')) : ''
             );
-            const [latestRegulations, adminAssignmentsHtml] = await Promise.all([
-                getLatestInternalRegulations(),
-                isAdminRole() ? buildAdminAssignmentPanel() : Promise.resolve('')
-            ]);
+            let latestRegulations = null;
+            let adminAssignmentsHtml = isAdminRole() ? (adminAssignmentsHtmlCache || '') : '';
+            try {
+                const loaded = await Promise.all([
+                    getLatestInternalRegulations().catch((err) => ({ error: err })),
+                    isAdminRole() ? buildAdminAssignmentPanel() : Promise.resolve('')
+                ]);
+                latestRegulations = loaded[0];
+                adminAssignmentsHtml = loaded[1] || adminAssignmentsHtml;
+            } catch (e) {
+                if (isAdminRole() && !adminAssignmentsHtml) adminAssignmentsHtml = adminAssignmentsOfflineNotice();
+            }
             if (latestRegulations && !latestRegulations.error) regulationsMetaCache = latestRegulations;
             if (isAdminRole() && navigator.onLine !== false && adminAssignmentsHtml && !adminAssignmentsHtml.includes('data-offline-assign')) {
                 adminAssignmentsHtmlCache = adminAssignmentsHtml;
             }
             paintProfile(
                 regulationsMetaCache.date ? `Τελευταία ενημέρωση: ${regulationsMetaCache.date}` : 'Τελευταία ενημέρωση: —',
-                isAdminRole() ? adminAssignmentsHtmlCache : ''
+                isAdminRole() ? (adminAssignmentsHtml || adminAssignmentsHtmlCache) : ''
             );
         }
 
