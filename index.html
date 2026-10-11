@@ -6164,7 +6164,7 @@
                 const items = assigns.map(row => {
                     return `<div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-700/70 last:border-0">
                         <span class="text-xs text-slate-200">${escapeHtml(assignmentRowLabel(row))}</span>
-                        <button type="button" data-del-assign="${row.id}" class="text-[10px] text-red-300 hover:text-red-200">Διαγραφή</button>
+                        <button type="button" data-del-assign="${row.id}" class="tab-action tab-action-danger">Διαγραφή</button>
                     </div>`;
                 }).join('');
                 return `<div class="mb-3 last:mb-0"><p class="text-[11px] font-semibold text-indigo-300 mb-1">${escapeHtml(name)}</p>${items}</div>`;
