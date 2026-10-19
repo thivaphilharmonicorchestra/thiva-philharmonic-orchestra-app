@@ -1053,8 +1053,10 @@
         };
 
         function fetchWithTimeout(input, init = {}) {
+            const href = String(typeof input === 'string' ? input : (input && input.url) || '');
+            const storageCall = /\/storage\//i.test(href);
             const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 20000);
+            const timer = setTimeout(() => controller.abort(), storageCall ? 90000 : 45000);
             const userSignal = init.signal;
             if (userSignal) {
                 if (userSignal.aborted) controller.abort();
@@ -2326,13 +2328,16 @@
         }
 
         async function fetchLiveMusicLibrary() {
-            let musicQuery = await supabaseClient
+            const cols = 'id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id';
+            const run = () => supabaseClient
                 .from('music_library')
-                .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id)');
+                .select(cols)
+                .order('id', { ascending: true })
+                .range(0, 999);
+            let musicQuery = await run();
             if (musicQuery.error) {
-                musicQuery = await supabaseClient
-                    .from('music_library')
-                    .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id, instruments(name))');
+                try { await supabaseClient.auth.refreshSession(); } catch (e) {}
+                musicQuery = await run();
             }
             if (musicQuery.error || !Array.isArray(musicQuery.data)) {
                 return { error: musicQuery.error || true, music: null };
@@ -3124,8 +3129,14 @@
         }
 
         async function refreshMusicLibraryFromServer() {
+            if (scorePrefetchInFlight) scorePrefetchGen += 1;
             try {
-                const live = await withTimeout(fetchLiveMusicLibrary(), 20000, 'music-list-timeout');
+                try { await supabaseClient.auth.getSession(); } catch (e) {}
+                let live = await fetchLiveMusicLibrary();
+                if ((live.error || !Array.isArray(live.music) || (!live.music.length && musicLibraryCache.length))) {
+                    try { await supabaseClient.auth.refreshSession(); } catch (e) {}
+                    live = await fetchLiveMusicLibrary();
+                }
                 if (live.error || !Array.isArray(live.music)) return false;
                 if (!live.music.length && musicLibraryCache.length) return false;
                 applyMusicLibrary(live.music);
