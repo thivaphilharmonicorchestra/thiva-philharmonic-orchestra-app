@@ -922,22 +922,54 @@
             offlinePdfLinks[String(pieceId)] = pdfLink;
         }
 
+        async function scoresListCachedPdfs(userId) {
+            if (!userId) return [];
+            try {
+                const db = await openScoresIdb();
+                return await new Promise((resolve, reject) => {
+                    const tx = db.transaction('pdfs', 'readonly');
+                    const req = tx.objectStore('pdfs').openCursor();
+                    const out = [];
+                    req.onsuccess = () => {
+                        const cursor = req.result;
+                        if (!cursor) {
+                            resolve(out);
+                            return;
+                        }
+                        const row = cursor.value;
+                        if (row && row.userId === userId && row.pieceId != null) {
+                            out.push({ pieceId: row.pieceId, pdfLink: row.pdfLink || '' });
+                        }
+                        cursor.continue();
+                    };
+                    req.onerror = () => reject(req.error);
+                });
+            } catch {
+                return [];
+            }
+        }
+
         async function refreshOfflinePdfFlags() {
             offlinePdfPieceIds = new Set();
             offlinePdfLinks = {};
-            const snap = await scoresGetMeta(currentUser?.id);
+            const userId = currentUser?.id;
+            if (!userId) return;
+            const snap = await scoresGetMeta(userId);
             const cached = snap?.cached || {};
             Object.keys(cached).forEach((id) => {
                 offlinePdfPieceIds.add(Number(id));
-                offlinePdfLinks[id] = cached[id];
+                offlinePdfLinks[String(id)] = cached[id];
+            });
+            const stored = await scoresListCachedPdfs(userId);
+            stored.forEach((row) => {
+                const id = String(row.pieceId);
+                offlinePdfPieceIds.add(Number(row.pieceId));
+                if (row.pdfLink) offlinePdfLinks[id] = row.pdfLink;
             });
         }
 
         function pieceIsOnDevice(item) {
-            if (!item?.id || !item.pdf_link) return false;
-            if (!offlinePdfPieceIds.has(Number(item.id))) return false;
-            const stored = offlinePdfLinks[String(item.id)];
-            return !!(stored && samePdfPath(stored, item.pdf_link));
+            return !!(item?.id && item.pdf_link && offlinePdfPieceIds.has(Number(item.id)));
         }
 
         async function restoreOfflineSessionSnapshot() {
@@ -2387,16 +2419,22 @@
         }
 
         async function fetchLiveMusicLibrary() {
-            const cols = 'id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id';
-            const run = () => supabaseClient
+            if (isAdminRole() || isConductorRole()) {
+                try { await supabaseClient.rpc('sync_music_pdf_updated_at'); } catch (e) {}
+            }
+            const cols = 'id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, updated_at';
+            const run = (selectCols) => supabaseClient
                 .from('music_library')
-                .select(cols)
+                .select(selectCols)
                 .order('id', { ascending: true })
                 .range(0, 999);
-            let musicQuery = await run();
+            let musicQuery = await run(cols);
             if (musicQuery.error) {
                 try { await supabaseClient.auth.refreshSession(); } catch (e) {}
-                musicQuery = await run();
+                musicQuery = await run(cols);
+            }
+            if (musicQuery.error && /updated_at/i.test(String(musicQuery.error.message || ''))) {
+                musicQuery = await run('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id');
             }
             if (musicQuery.error || !Array.isArray(musicQuery.data)) {
                 return { error: musicQuery.error || true, music: null };
@@ -2415,7 +2453,15 @@
         }
 
         function musicLibrarySignature(list) {
-            return (list || []).map((item) => `${item.id}:${item.pdf_link || ''}`).sort().join('|');
+            return (list || []).map((item) => `${item.id}:${item.pdf_link || ''}:${item.updated_at || ''}`).sort().join('|');
+        }
+
+        function pdfCacheIsStale(existing, item) {
+            const rev = item?.updated_at;
+            if (!rev || !existing?.savedAt) return false;
+            const revAt = new Date(rev).getTime();
+            if (!Number.isFinite(revAt)) return false;
+            return revAt > Number(existing.savedAt);
         }
 
         function applyMusicLibrary(music, { fromOfflineCache = false } = {}) {
@@ -3757,6 +3803,7 @@
         async function bytesForSheetPdf(filePath, pieceId, { preferNetwork = false } = {}) {
             const path = sheetMusicObjectPaths(filePath)[0] || String(filePath || '');
             const userId = currentUser?.id;
+            const item = musicPieceById(pieceId);
             const cached = userId ? await scoresGetPdf(userId, pieceId) : null;
             const cacheHit = cached && samePdfPath(cached.pdfLink, path)
                 ? new Uint8Array(cached.bytes.slice(0))
@@ -3780,17 +3827,20 @@
                 }
             }
 
-            if (usableCache) {
-                if (navigator.onLine !== false && userId) {
-                    loadLive().catch(() => {});
-                }
+            if (usableCache && !pdfCacheIsStale(cached, item)) {
                 return usableCache;
             }
 
             if (navigator.onLine === false) {
+                if (usableCache) return usableCache;
                 throw new Error('offline-missing');
             }
-            return loadLive();
+            try {
+                return await loadLive();
+            } catch (e) {
+                if (usableCache) return usableCache;
+                throw e;
+            }
         }
 
         function isFullScoreItem(item) {
@@ -3819,7 +3869,12 @@
                     if (gen !== scorePrefetchGen || currentUser?.id !== userId) return 'abort';
                     if (!item?.pdf_link || item.id == null) return 'skip';
                     const existing = await scoresGetPdf(userId, item.id);
-                    if (existing && samePdfPath(existing.pdfLink, item.pdf_link) && isPdfBytes(existing.bytes)) {
+                    if (
+                        existing
+                        && samePdfPath(existing.pdfLink, item.pdf_link)
+                        && isPdfBytes(existing.bytes)
+                        && !pdfCacheIsStale(existing, item)
+                    ) {
                         scorePrefetchFailedIds.delete(Number(item.id));
                         return 'skip';
                     }
@@ -3896,8 +3951,7 @@
             pdfOpenBusy = true;
             showPdfViewerShell({ pieceId });
             try {
-                const online = navigator.onLine !== false;
-                const bytes = await bytesForSheetPdf(filePath, pieceId, { preferNetwork: online });
+                const bytes = await bytesForSheetPdf(filePath, pieceId);
                 await openPdfViewer(bytes, pieceId, { shellReady: true, rethrow: true });
             } catch (error) {
                 if (currentUser?.id && pieceId != null) {
@@ -3925,9 +3979,7 @@
         }
 
         async function fetchSignedPdfFile(filePath, title, pieceId) {
-            const bytes = await bytesForSheetPdf(filePath, pieceId, {
-                preferNetwork: navigator.onLine !== false
-            });
+            const bytes = await bytesForSheetPdf(filePath, pieceId);
             const original = new File([bytes], safePdfFileName(title), { type: 'application/pdf' });
             return stampSharedPdfFile(original);
         }
