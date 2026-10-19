@@ -3589,7 +3589,7 @@
             if (lower.includes('offline-missing')) {
                 return 'Αυτή η παρτιτούρα δεν έχει αποθηκευτεί ακόμα σε αυτή τη συσκευή. Ανοίξτε την όταν έχετε σύνδεση.';
             }
-            if (lower.includes('not-a-pdf')) {
+            if (lower.includes('not-a-pdf') || lower.includes('invalidpdf') || lower.includes('invalid pdf')) {
                 return 'Το αρχείο δεν είναι έγκυρο PDF. Ανεβάστε το ξανά από Διαχειριστής → Παρτιτούρες.';
             }
             if (lower.includes('failed to fetch') || lower.includes('network') || lower.includes('abort') || lower.includes('timeout')) {
@@ -3662,47 +3662,53 @@
             throw lastError || new Error('Άγνωστο σφάλμα');
         }
 
-        async function bytesForSheetPdf(filePath, pieceId) {
+        async function saveSheetPdfBytes(userId, pieceId, path, bytes) {
+            if (!userId || pieceId == null) return;
+            try {
+                await scoresPutPdf(userId, pieceId, path, bytes);
+                if (document.getElementById('music-results')) paintMusicResults();
+            } catch (e) {
+                console.warn('score cache save failed', e);
+            }
+        }
+
+        async function bytesForSheetPdf(filePath, pieceId, { preferNetwork = false } = {}) {
             const path = sheetMusicObjectPaths(filePath)[0] || String(filePath || '');
             const userId = currentUser?.id;
             const cached = userId ? await scoresGetPdf(userId, pieceId) : null;
             const cacheHit = cached && samePdfPath(cached.pdfLink, path)
                 ? new Uint8Array(cached.bytes.slice(0))
                 : null;
+            const usableCache = cacheHit && isPdfBytes(cacheHit) ? cacheHit : null;
+            if (cacheHit && !usableCache && userId) await scoresDeletePdf(userId, pieceId);
 
-            if (cacheHit && isPdfBytes(cacheHit)) {
-                if (navigator.onLine !== false && userId) {
-                    loadSignedPdfBytes('sheet-music', path, { retries: 0 })
-                        .then((fresh) => {
-                            if (currentUser?.id !== userId) return;
-                            return scoresPutPdf(userId, pieceId, path, fresh);
-                        })
-                        .then(() => {
-                            if (document.getElementById('music-results')) paintMusicResults();
-                        })
-                        .catch(() => {});
+            const loadLive = async () => {
+                const bytes = await loadSignedPdfBytes('sheet-music', path);
+                if (!isPdfBytes(bytes)) throw new Error('not-a-pdf');
+                await saveSheetPdfBytes(userId, pieceId, path, bytes);
+                return bytes;
+            };
+
+            if (preferNetwork && navigator.onLine !== false) {
+                try {
+                    return await loadLive();
+                } catch (e) {
+                    if (usableCache) return usableCache;
+                    throw e;
                 }
-                return cacheHit;
             }
-            if (cacheHit && userId) {
-                await scoresDeletePdf(userId, pieceId);
+
+            if (usableCache) {
+                if (navigator.onLine !== false && userId) {
+                    loadLive().catch(() => {});
+                }
+                return usableCache;
             }
 
             if (navigator.onLine === false) {
                 throw new Error('offline-missing');
             }
-
-            const bytes = await loadSignedPdfBytes('sheet-music', path);
-            if (!isPdfBytes(bytes)) throw new Error('not-a-pdf');
-            if (userId && pieceId != null) {
-                try {
-                    await scoresPutPdf(userId, pieceId, path, bytes);
-                    if (document.getElementById('music-results')) paintMusicResults();
-                } catch (e) {
-                    console.warn('score cache save failed', e);
-                }
-            }
-            return bytes;
+            return loadLive();
         }
 
         function isFullScoreItem(item) {
@@ -3786,9 +3792,22 @@
             pdfOpenBusy = true;
             showPdfViewerShell({ pieceId });
             try {
-                const bytes = await bytesForSheetPdf(filePath, pieceId);
-                await openPdfViewer(bytes, pieceId, { shellReady: true });
+                const online = navigator.onLine !== false;
+                const bytes = await bytesForSheetPdf(filePath, pieceId, { preferNetwork: online });
+                await openPdfViewer(bytes, pieceId, { shellReady: true, rethrow: true });
             } catch (error) {
+                if (currentUser?.id && pieceId != null) {
+                    await scoresDeletePdf(currentUser.id, pieceId);
+                }
+                try {
+                    if (navigator.onLine !== false) {
+                        const retry = await bytesForSheetPdf(filePath, pieceId, { preferNetwork: true });
+                        await openPdfViewer(retry, pieceId, { shellReady: true, rethrow: true });
+                        return;
+                    }
+                } catch (retryErr) {
+                    error = retryErr;
+                }
                 showAppNotice('Σφάλμα πρόσβασης στο αρχείο: ' + signedPdfErrorMessage(error));
                 await closePdfViewer();
             } finally {
@@ -3802,7 +3821,9 @@
         }
 
         async function fetchSignedPdfFile(filePath, title, pieceId) {
-            const bytes = await bytesForSheetPdf(filePath, pieceId);
+            const bytes = await bytesForSheetPdf(filePath, pieceId, {
+                preferNetwork: navigator.onLine !== false
+            });
             const original = new File([bytes], safePdfFileName(title), { type: 'application/pdf' });
             return stampSharedPdfFile(original);
         }
@@ -4048,6 +4069,7 @@
                 setPdfLoadingCover(false);
                 requestAnimationFrame(() => schedulePdfRefit());
             } catch (error) {
+                if (options.rethrow) throw error;
                 showAppNotice('Σφάλμα φόρτωσης PDF: ' + signedPdfErrorMessage(error));
                 closePdfViewer();
             }
