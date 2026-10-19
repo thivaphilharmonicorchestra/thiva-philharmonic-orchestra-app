@@ -266,6 +266,36 @@
             background: #dc2626;
             color: #fff;
         }
+        .att-mark {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 2rem;
+            height: 2rem;
+            border-radius: 0.5rem;
+            border: 1px solid #475569;
+            background: #1e293b;
+            color: #94a3b8;
+            flex-shrink: 0;
+        }
+        .att-mark-yes {
+            color: #6ee7b7;
+            border-color: #047857;
+        }
+        .att-mark-yes.on {
+            background: #059669;
+            border-color: #059669;
+            color: #fff;
+        }
+        .att-mark-no {
+            color: #fca5a5;
+            border-color: #991b1b;
+        }
+        .att-mark-no.on {
+            background: rgba(185, 28, 28, 0.92);
+            border-color: rgba(185, 28, 28, 0.92);
+            color: #fecaca;
+        }
         .chrome-close {
             display: inline-flex;
             width: 2.5rem;
@@ -1090,8 +1120,13 @@
             const sleptMs = appHiddenAt ? Date.now() - appHiddenAt : 0;
             const fromBfcache = !!(event && event.type === 'pageshow' && event.persisted);
             if ((fromBfcache || sleptMs >= BACKGROUND_RELOAD_MS) && !isPdfViewerOpen() && !requirePasswordSetup) {
-                if (navigator.onLine === false || scorePrefetchInFlight) {
+                if (navigator.onLine === false) {
                     appHiddenAt = 0;
+                    return;
+                }
+                if (scorePrefetchInFlight) {
+                    appHiddenAt = 0;
+                    if (currentUser) warmScoreCache();
                     return;
                 }
                 window.location.reload();
@@ -1100,6 +1135,7 @@
             appHiddenAt = 0;
             try { supabaseClient.auth.startAutoRefresh(); } catch {}
             checkServiceWorkerUpdate();
+            if (currentUser && navigator.onLine !== false) warmScoreCache();
         }
 
         async function runTabLoad(loader) {
@@ -1166,6 +1202,8 @@
             'magnifying-glass': 'M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z',
             'check-circle': 'M173.66,98.34a8,8,0,0,1,0,11.32l-56,56a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35A8,8,0,0,1,173.66,98.34ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z',
             'x-circle': 'M165.66,101.66,139.31,128l26.35,26.34a8,8,0,0,1-11.32,11.32L128,139.31l-26.34,26.35a8,8,0,0,1-11.32-11.32L116.69,128,90.34,101.66a8,8,0,0,1,11.32-11.32L128,116.69l26.34-26.35a8,8,0,0,1,11.32,11.32ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z',
+            check: 'M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z',
+            x: 'M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z',
             'cell-tower': 'M135.16,84.42a8,8,0,0,0-14.32,0l-72,144a8,8,0,0,0,14.31,7.16L77,208h102.1l13.79,27.58A8,8,0,0,0,200,240a8,8,0,0,0,7.15-11.58ZM128,105.89,155.06,160H100.94ZM85,192l8-16h70.1l8,16Zm74.54-98.26a32,32,0,1,0-63,0,8,8,0,1,1-15.74,2.85,48,48,0,1,1,94.46,0,8,8,0,0,1-7.86,6.58,8.74,8.74,0,0,1-1.43-.13A8,8,0,0,1,159.49,93.74ZM64.15,136.21a80,80,0,1,1,127.7,0,8,8,0,0,1-12.76-9.65,64,64,0,1,0-102.18,0,8,8,0,0,1-12.76,9.65Z',
             bell: 'M221.8,175.94C216.25,166.38,208,139.33,208,104a80,80,0,1,0-160,0c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0H208a16,16,0,0,0,13.8-24.06ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a64,64,0,1,1,128,0c0,36.05,8.28,66.73,16,80Z',
             'file-pdf': 'M224,152a8,8,0,0,1-8,8H192v16h16a8,8,0,0,1,0,16H192v16a8,8,0,0,1-16,0V152a8,8,0,0,1,8-8h32A8,8,0,0,1,224,152ZM92,172a28,28,0,0,1-28,28H56v8a8,8,0,0,1-16,0V152a8,8,0,0,1,8-8H64A28,28,0,0,1,92,172Zm-16,0a12,12,0,0,0-12-12H56v24h8A12,12,0,0,0,76,172Zm88,8a36,36,0,0,1-36,36H112a8,8,0,0,1-8-8V152a8,8,0,0,1,8-8h16A36,36,0,0,1,164,180Zm-16,0a20,20,0,0,0-20-20h-8v40h8A20,20,0,0,0,148,180ZM40,112V40A16,16,0,0,1,56,24h96a8,8,0,0,1,5.66,2.34l56,56A8,8,0,0,1,216,88v24a8,8,0,0,1-16,0V96H152a8,8,0,0,1-8-8V40H56v72a8,8,0,0,1-16,0ZM160,80h28.69L160,51.31Z',
@@ -2288,20 +2326,48 @@
             }
         }
 
+        async function fetchLiveMusicLibrary() {
+            let musicQuery = await supabaseClient
+                .from('music_library')
+                .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id, instruments(name))');
+            if (musicQuery.error) {
+                musicQuery = await supabaseClient
+                    .from('music_library')
+                    .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id)');
+            }
+            if (musicQuery.error || !Array.isArray(musicQuery.data)) {
+                return { error: musicQuery.error || true, music: null };
+            }
+            return { error: null, music: musicQuery.data };
+        }
+
+        function musicLibrarySignature(list) {
+            return (list || []).map((item) => `${item.id}:${item.pdf_link || ''}`).sort().join('|');
+        }
+
+        function applyMusicLibrary(music, { fromOfflineCache = false } = {}) {
+            const changed = musicLibrarySignature(music) !== musicLibrarySignature(musicLibraryCache);
+            musicLibraryCache = music || [];
+            if (changed) {
+                scorePrefetchGen += 1;
+                scorePrefetchInFlight = null;
+            }
+            if (!fromOfflineCache && currentUser?.id) {
+                persistOfflineSessionSnapshot({ library: musicLibraryCache });
+            }
+            if (changed && document.getElementById('music-results')) paintMusicResults();
+            return changed;
+        }
+
+        let lastWarmScoreAt = 0;
         async function warmScoreCache() {
             if (!currentUser?.id || navigator.onLine === false) return;
+            if (Date.now() - lastWarmScoreAt < 20000) return;
             try {
-                let musicQuery = await supabaseClient
-                    .from('music_library')
-                    .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id, instruments(name))');
-                if (musicQuery.error) {
-                    musicQuery = await supabaseClient
-                        .from('music_library')
-                        .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id)');
-                }
-                if (musicQuery.error || !Array.isArray(musicQuery.data) || !musicQuery.data.length) return;
-                musicLibraryCache = musicQuery.data;
-                await persistOfflineSessionSnapshot({ library: musicLibraryCache });
+                const { error, music } = await fetchLiveMusicLibrary();
+                if (error || !music) return;
+                lastWarmScoreAt = Date.now();
+                applyMusicLibrary(music);
                 prefetchEntitledPdfs(musicLibraryCache);
             } catch (e) {
                 console.warn('warmScoreCache', e);
@@ -2772,7 +2838,13 @@
         }
 
         function switchTab(tab) {
-            if (tab === activeTab) return;
+            if (tab === activeTab) {
+                if (tab === 'music' && navigator.onLine !== false) {
+                    setTabLoading(true);
+                    runTabLoad(renderMusicTab);
+                }
+                return;
+            }
             if (tab !== 'music') musicTabShellReady = false;
             pendingTabScrollReset = true;
             activeTab = tab;
@@ -3033,16 +3105,14 @@
             }
 
             if (navigator.onLine !== false) {
-                let musicQuery = await supabaseClient
-                    .from('music_library')
-                    .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id, instruments(name))');
-                if (musicQuery.error) {
-                    musicQuery = await supabaseClient
-                        .from('music_library')
-                        .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id)');
+                try {
+                    const live = await fetchLiveMusicLibrary();
+                    if (live.error) loadError = live.error;
+                    else music = live.music;
+                } catch (e) {
+                    loadError = e;
+                    console.warn('renderMusicTab', e);
                 }
-                if (musicQuery.error) loadError = musicQuery.error;
-                else music = musicQuery.data;
             }
 
             if (!music) {
@@ -3060,10 +3130,7 @@
                 return;
             }
 
-            musicLibraryCache = music || [];
-            if (!fromOfflineCache && currentUser?.id && musicLibraryCache.length) {
-                await persistOfflineSessionSnapshot({ library: musicLibraryCache });
-            }
+            applyMusicLibrary(music || [], { fromOfflineCache });
             if (activeTab !== 'music') return;
             await refreshOfflinePdfFlags();
             if (!keepShell) {
@@ -3515,7 +3582,11 @@
                 updateMusicSyncStatus();
                 return;
             }
-            if (scorePrefetchInFlight) return scorePrefetchInFlight;
+            if (scorePrefetchInFlight) {
+                const incoming = musicLibrarySignature(music);
+                const cached = musicLibrarySignature(musicLibraryCache);
+                if (incoming === cached) return scorePrefetchInFlight;
+            }
             const userId = currentUser.id;
             const queue = music.slice().sort((a, b) => Number(isFullScoreItem(a)) - Number(isFullScoreItem(b)));
             const gen = scorePrefetchGen;
@@ -4864,7 +4935,7 @@
         }
 
         // --- ATTENDANCE TAB (Fixed to map first_name + last_name correctly) ---
-        async function renderAttendanceTab() {
+        async function renderAttendanceTab(options = {}) {
             const content = document.getElementById('content');
 
             const isAdmin = isPrivilegedRole();
@@ -4874,7 +4945,12 @@
             let myResponses = [];
             let stale = false;
 
-            if (navigator.onLine !== false) {
+            if (options.skipFetch && attendanceTabCache?.events) {
+                events = attendanceTabCache.events;
+                profiles = attendanceTabCache.profiles || [];
+                allAttendance = attendanceTabCache.allAttendance || [];
+                myResponses = attendanceTabCache.myResponses || [];
+            } else if (navigator.onLine !== false) {
                 try {
                     const { data: liveEvents, error: eventError } = await supabaseClient.from('band_events').select('*').order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true });
                     if (!eventError) {
@@ -4984,9 +5060,11 @@
                         };
                         const actualBtns = (email, actual) => {
                             const encoded = encodeURIComponent(String(email || '').trim().toLowerCase());
-                            return `<div class="mt-1 space-x-2">
-                                ${actual !== 'present' ? `<button type="button" onclick="staffSetActual(${ev.id}, '${encoded}', 'present')" class="text-[10px] text-emerald-300 underline">Παρευρέθηκε</button>` : '<span class="text-[10px] text-emerald-400">Παρευρέθηκε</span>'}
-                                ${actual !== 'absent' ? `<button type="button" onclick="staffSetActual(${ev.id}, '${encoded}', 'absent')" class="text-[10px] text-red-300 underline">Απών</button>` : '<span class="text-[10px] text-red-400">Απών</span>'}
+                            const presentOn = actual === 'present';
+                            const absentOn = actual === 'absent';
+                            return `<div class="flex items-center gap-1.5 shrink-0">
+                                <button type="button" onclick="staffSetActual(${ev.id}, '${encoded}', 'present')" class="att-mark att-mark-yes${presentOn ? ' on' : ''}" aria-label="Παρευρέθηκε" aria-pressed="${presentOn ? 'true' : 'false'}">${uiIcon('check', 'h-4 w-4')}</button>
+                                <button type="button" onclick="staffSetActual(${ev.id}, '${encoded}', 'absent')" class="att-mark att-mark-no${absentOn ? ' on' : ''}" aria-label="Απών" aria-pressed="${absentOn ? 'true' : 'false'}">${uiIcon('x', 'h-4 w-4')}</button>
                             </div>`;
                         };
                         const rsvpBoxes = `
@@ -5026,9 +5104,11 @@
                                         const email = String(profile.email || '').trim().toLowerCase();
                                         const row = responseByEmail.get(email);
                                         const instrument = attendanceInstrumentSuffix(profile);
-                                        return `<div class="border-t border-slate-800 py-1.5 first:border-0">
-                                            <div class="text-slate-200">${escapeHtml(personName(email, profile))}${escapeHtml(instrument)}</div>
-                                            <div class="text-[10px] text-slate-500">Δήλωση: ${escapeHtml(rsvpLabel(row))}</div>
+                                        return `<div class="border-t border-slate-800 py-1.5 first:border-0 flex items-center justify-between gap-2" data-att-row="${ev.id}:${escapeHtml(email)}">
+                                            <div class="min-w-0">
+                                                <div class="text-slate-200">${escapeHtml(personName(email, profile))}${escapeHtml(instrument)}</div>
+                                                <div class="text-[10px] text-slate-500">Δήλωση: ${escapeHtml(rsvpLabel(row))}</div>
+                                            </div>
                                             ${actualBtns(email, row?.actual_attendance || null)}
                                         </div>`;
                                     }).join('')}
@@ -5129,6 +5209,17 @@
             html += '</div>';
 
             content.innerHTML = html;
+            const details = content.querySelector('details');
+            if (options.pastOpen && details) details.open = true;
+            const scroller = content.querySelector('.tab-scroll') || content;
+            const restore = () => {
+                if (options.scrollY != null && scroller) scroller.scrollTop = options.scrollY;
+            };
+            requestAnimationFrame(() => {
+                restore();
+                requestAnimationFrame(restore);
+            });
+            setTimeout(restore, 50);
         }
 
         async function loadSubscriberCount() {
@@ -5396,6 +5487,25 @@
             }
         }
 
+        function captureAttendanceView(eventId, userEmail) {
+            const scroller = document.querySelector('#content .tab-scroll');
+            return {
+                scrollY: scroller?.scrollTop || 0,
+                pastOpen: !!document.querySelector('#content details')?.open,
+                rowKey: `${eventId}:${String(userEmail || '').trim().toLowerCase()}`
+            };
+        }
+
+        function patchAttendanceCache(eventId, userEmail, patch) {
+            if (!attendanceTabCache) return;
+            const email = String(userEmail || '').trim().toLowerCase();
+            const list = attendanceTabCache.allAttendance || [];
+            const idx = list.findIndex((row) => Number(row.event_id) === Number(eventId) && String(row.user_email || '').trim().toLowerCase() === email);
+            if (idx >= 0) list[idx] = { ...list[idx], ...patch };
+            else list.push({ event_id: eventId, user_email: email, status: '', excuse: '', ...patch });
+            attendanceTabCache.allAttendance = list;
+        }
+
         async function staffSetRsvp(eventId, encodedEmail, status) {
             if (!isPrivilegedRole()) {
                 showAppNotice('Μόνο ο διαχειριστής και ο μαέστρος μπορούν να καταχωρήσουν δήλωση.');
@@ -5403,6 +5513,7 @@
             }
             const userEmail = decodeURIComponent(encodedEmail || '').trim().toLowerCase();
             if (!userEmail) return;
+            const view = captureAttendanceView(eventId, userEmail);
             let excuse = '';
             if (status === 'Not Going') {
                 excuse = prompt('Αιτιολογία απουσίας:', 'Δήλωση μέσω μαέστρου/διαχειριστή');
@@ -5433,7 +5544,10 @@
                     { onConflict: 'event_id,user_email' }
                 );
             if (error) showAppNotice(`Σφάλμα δήλωσης:\n${error.message}`);
-            else renderAttendanceTab();
+            else {
+                patchAttendanceCache(eventId, userEmail, { status, excuse });
+                await renderAttendanceTab({ quiet: true, skipFetch: true, ...view });
+            }
         }
 
         async function staffSetActual(eventId, encodedEmail, actual) {
@@ -5443,6 +5557,7 @@
             }
             const userEmail = decodeURIComponent(encodedEmail || '').trim().toLowerCase();
             if (!userEmail) return;
+            const view = captureAttendanceView(eventId, userEmail);
             const { data: existing } = await supabaseClient
                 .from('event_responses')
                 .select('status, excuse')
@@ -5463,7 +5578,10 @@
                     { onConflict: 'event_id,user_email' }
                 );
             if (error) showAppNotice(`Σφάλμα παρουσίας:\n${error.message}`);
-            else renderAttendanceTab();
+            else {
+                patchAttendanceCache(eventId, userEmail, { actual_attendance: actual });
+                await renderAttendanceTab({ quiet: true, skipFetch: true, ...view });
+            }
         }
 
         async function addEvent() {
