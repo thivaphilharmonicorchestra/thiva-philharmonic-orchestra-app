@@ -805,10 +805,13 @@
             const run = async () => {
                 try {
                     const prev = (await scoresGetMeta(userId)) || {};
+                    const { cachedReplace, ...rest } = patch;
                     const next = {
                         ...prev,
-                        ...patch,
-                        cached: { ...(prev.cached || {}), ...(patch.cached || {}) },
+                        ...rest,
+                        cached: cachedReplace
+                            ? cachedReplace
+                            : { ...(prev.cached || {}), ...(patch.cached || {}) },
                         tabs: { ...(prev.tabs || {}), ...(patch.tabs || {}) },
                         userId,
                         savedAt: Date.now()
@@ -847,8 +850,31 @@
             }
         }
 
+        function isPdfBytes(bytes) {
+            const u = bytes instanceof Uint8Array
+                ? bytes
+                : (bytes ? new Uint8Array(bytes) : null);
+            return !!(u && u.length >= 5 && u[0] === 0x25 && u[1] === 0x50 && u[2] === 0x44 && u[3] === 0x46);
+        }
+
+        async function scoresDeletePdf(userId, pieceId) {
+            if (!userId || pieceId == null) return;
+            try {
+                await scoresIdbRequest('pdfs', 'readwrite', (store) => store.delete(scoresPdfKey(userId, pieceId)));
+            } catch (e) {
+                console.warn('score cache delete failed', e);
+            }
+            const snap = await scoresGetMeta(userId) || {};
+            const cached = { ...(snap.cached || {}) };
+            delete cached[String(pieceId)];
+            await scoresPutMeta(userId, { cachedReplace: cached });
+            offlinePdfPieceIds.delete(Number(pieceId));
+            delete offlinePdfLinks[String(pieceId)];
+        }
+
         async function scoresPutPdf(userId, pieceId, pdfLink, bytes) {
             if (!userId || pieceId == null || !bytes) return;
+            if (!isPdfBytes(bytes)) throw new Error('not-a-pdf');
             const copy = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
             const blob = new Blob([copy], { type: 'application/pdf' });
             await scoresIdbRequest('pdfs', 'readwrite', (store) => store.put({
@@ -878,7 +904,7 @@
             if (!item?.id || !item.pdf_link) return false;
             if (!offlinePdfPieceIds.has(Number(item.id))) return false;
             const stored = offlinePdfLinks[String(item.id)];
-            return !stored || samePdfPath(stored, item.pdf_link);
+            return !!(stored && samePdfPath(stored, item.pdf_link));
         }
 
         async function restoreOfflineSessionSnapshot() {
@@ -3530,6 +3556,9 @@
             if (lower.includes('offline-missing')) {
                 return 'Αυτή η παρτιτούρα δεν έχει αποθηκευτεί ακόμα σε αυτή τη συσκευή. Ανοίξτε την όταν έχετε σύνδεση.';
             }
+            if (lower.includes('not-a-pdf')) {
+                return 'Το αρχείο δεν είναι έγκυρο PDF. Ανεβάστε το ξανά από Διαχειριστής → Παρτιτούρες.';
+            }
             if (lower.includes('failed to fetch') || lower.includes('network') || lower.includes('abort') || lower.includes('timeout')) {
                 return 'Αδύναμη σύνδεση. Δοκιμάστε ξανά όταν το σήμα είναι καλύτερο.';
             }
@@ -3594,7 +3623,7 @@
                 ? new Uint8Array(cached.bytes.slice(0))
                 : null;
 
-            if (cacheHit) {
+            if (cacheHit && isPdfBytes(cacheHit)) {
                 if (navigator.onLine !== false && userId) {
                     loadSignedPdfBytes('sheet-music', path, { retries: 0 })
                         .then((fresh) => {
@@ -3608,12 +3637,16 @@
                 }
                 return cacheHit;
             }
+            if (cacheHit && userId) {
+                await scoresDeletePdf(userId, pieceId);
+            }
 
             if (navigator.onLine === false) {
                 throw new Error('offline-missing');
             }
 
             const bytes = await loadSignedPdfBytes('sheet-music', path);
+            if (!isPdfBytes(bytes)) throw new Error('not-a-pdf');
             if (userId && pieceId != null) {
                 try {
                     await scoresPutPdf(userId, pieceId, path, bytes);
@@ -3651,12 +3684,14 @@
                     if (gen !== scorePrefetchGen || currentUser?.id !== userId) return 'abort';
                     if (!item?.pdf_link || item.id == null) return 'skip';
                     const existing = await scoresGetPdf(userId, item.id);
-                    if (existing && samePdfPath(existing.pdfLink, item.pdf_link)) {
+                    if (existing && samePdfPath(existing.pdfLink, item.pdf_link) && isPdfBytes(existing.bytes)) {
                         scorePrefetchFailedIds.delete(Number(item.id));
                         return 'skip';
                     }
+                    if (existing) await scoresDeletePdf(userId, item.id);
                     try {
                         const bytes = await loadSignedPdfBytes('sheet-music', item.pdf_link, { retries });
+                        if (!isPdfBytes(bytes)) throw new Error('not-a-pdf');
                         let path = item.pdf_link;
                         try { path = decodeURIComponent(item.pdf_link); } catch {}
                         await scoresPutPdf(userId, item.id, path, bytes);
