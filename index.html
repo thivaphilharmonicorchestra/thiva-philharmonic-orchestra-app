@@ -1053,12 +1053,6 @@
         };
 
         function fetchWithTimeout(input, init = {}) {
-            const href = String(typeof input === 'string' ? input : (input && input.url) || '');
-            let host = '';
-            try { host = new URL(href, location.href).hostname; } catch {}
-            if (navigator.onLine === false && host.endsWith('supabase.co')) {
-                return Promise.reject(new TypeError('Failed to fetch'));
-            }
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), 20000);
             const userSignal = init.signal;
@@ -2334,11 +2328,11 @@
         async function fetchLiveMusicLibrary() {
             let musicQuery = await supabaseClient
                 .from('music_library')
-                .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id, instruments(name))');
+                .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id)');
             if (musicQuery.error) {
                 musicQuery = await supabaseClient
                     .from('music_library')
-                    .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id)');
+                    .select('id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id, musical_parts(display_name, part_position, is_beginner, instrument_id, instruments(name))');
             }
             if (musicQuery.error || !Array.isArray(musicQuery.data)) {
                 return { error: musicQuery.error || true, music: null };
@@ -2376,7 +2370,7 @@
 
         let lastWarmScoreAt = 0;
         async function warmScoreCache() {
-            if (!currentUser?.id || navigator.onLine === false) return;
+            if (!currentUser?.id) return;
             if (Date.now() - lastWarmScoreAt < 20000) return;
             try {
                 const { error, music } = await fetchLiveMusicLibrary();
@@ -2868,7 +2862,7 @@
 
         function switchTab(tab) {
             if (tab === activeTab) {
-                if (tab === 'music' && navigator.onLine !== false) {
+                if (tab === 'music') {
                     if (!document.getElementById('music-results')) setTabLoading(true);
                     runTabLoad(renderMusicTab);
                 }
@@ -3118,17 +3112,27 @@
         }
 
         // --- MUSIC TAB ---
+        function setMusicListBanner(failed) {
+            const banner = document.getElementById('music-offline-banner');
+            if (!banner) return;
+            banner.classList.toggle('hidden', !failed);
+            if (failed) {
+                banner.textContent = navigator.onLine === false
+                    ? 'Χωρίς σύνδεση — ανοίγουν μόνο όσες παρτιτούρες έχουν ήδη αποθηκευτεί σε αυτή τη συσκευή.'
+                    : 'Δεν έγινε ανανέωση της λίστας — εμφανίζονται οι παρτιτούρες που είναι ήδη αποθηκευμένες. Πατήστε Παρτιτούρες ξανά.';
+            }
+        }
+
         async function refreshMusicLibraryFromServer() {
-            if (navigator.onLine === false) return false;
             try {
-                const live = await withTimeout(fetchLiveMusicLibrary(), 12000, 'music-list-timeout');
+                const live = await withTimeout(fetchLiveMusicLibrary(), 20000, 'music-list-timeout');
                 if (live.error || !Array.isArray(live.music)) return false;
+                if (!live.music.length && musicLibraryCache.length) return false;
                 applyMusicLibrary(live.music);
                 if (activeTab !== 'music') return true;
                 await refreshOfflinePdfFlags();
                 const content = document.getElementById('content');
-                const banner = document.getElementById('music-offline-banner');
-                if (banner) banner.classList.add('hidden');
+                setMusicListBanner(false);
                 if (!document.getElementById('music-results') && content) {
                     await buildMusicTabShell(content, musicLibraryCache, { fromOfflineCache: false });
                     musicTabShellReady = true;
@@ -3145,36 +3149,34 @@
         async function renderMusicTab() {
             const content = document.getElementById('content');
             let keepShell = musicTabShellReady && document.getElementById('music-results');
-            let fromOfflineCache = false;
 
             if (!musicLibraryCache.length) {
                 const snap = await scoresGetMeta(currentUser?.id);
                 if (Array.isArray(snap?.library) && snap.library.length) {
                     musicLibraryCache = snap.library;
-                    fromOfflineCache = true;
                 }
             }
 
             if (!keepShell && musicLibraryCache.length && activeTab === 'music') {
-                await buildMusicTabShell(content, musicLibraryCache, { fromOfflineCache: fromOfflineCache || navigator.onLine === false });
+                await buildMusicTabShell(content, musicLibraryCache, { fromOfflineCache: false });
                 musicTabShellReady = true;
                 keepShell = true;
                 paintMusicResults();
             }
 
-            if (navigator.onLine !== false) {
-                if (keepShell) {
-                    refreshMusicLibraryFromServer();
-                    return;
-                }
+            if (keepShell) {
                 const ok = await refreshMusicLibraryFromServer();
-                if (ok) return;
+                if (!ok) setMusicListBanner(true);
+                return;
             }
+            const ok = await refreshMusicLibraryFromServer();
+            if (ok) return;
 
             if (musicLibraryCache.length && activeTab === 'music' && !document.getElementById('music-results')) {
                 await buildMusicTabShell(content, musicLibraryCache, { fromOfflineCache: true });
                 musicTabShellReady = true;
                 paintMusicResults();
+                setMusicListBanner(true);
                 return;
             }
 
