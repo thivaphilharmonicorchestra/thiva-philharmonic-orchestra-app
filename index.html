@@ -1208,7 +1208,7 @@
             'x-circle': 'M165.66,101.66,139.31,128l26.35,26.34a8,8,0,0,1-11.32,11.32L128,139.31l-26.34,26.35a8,8,0,0,1-11.32-11.32L116.69,128,90.34,101.66a8,8,0,0,1,11.32-11.32L128,116.69l26.34-26.35a8,8,0,0,1,11.32,11.32ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z',
             check: 'M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z',
             x: 'M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z',
-            'arrow-square-up-right': 'M200,64V168a8,8,0,0,1-16,0V83.31L69.66,197.66a8,8,0,0,1-11.32-11.32L172.69,72H88a8,8,0,0,1,0-16H192A8,8,0,0,1,200,64Z',
+            'arrow-square-up-right': 'M224,104a8,8,0,0,1-16,0V59.32l-66.34,66.34a8,8,0,0,1-11.32-11.32L196.68,48H152a8,8,0,0,1,0-16h64a8,8,0,0,1,8,8Zm-40,24a8,8,0,0,0-8,8v72H48V80h72a8,8,0,0,0,0-16H48A16,16,0,0,0,32,80V208a16,16,0,0,0,16,16H176a16,16,0,0,0,16-16V136A8,8,0,0,0,184,128Z',
             'cell-tower': 'M135.16,84.42a8,8,0,0,0-14.32,0l-72,144a8,8,0,0,0,14.31,7.16L77,208h102.1l13.79,27.58A8,8,0,0,0,200,240a8,8,0,0,0,7.15-11.58ZM128,105.89,155.06,160H100.94ZM85,192l8-16h70.1l8,16Zm74.54-98.26a32,32,0,1,0-63,0,8,8,0,1,1-15.74,2.85,48,48,0,1,1,94.46,0,8,8,0,0,1-7.86,6.58,8.74,8.74,0,0,1-1.43-.13A8,8,0,0,1,159.49,93.74ZM64.15,136.21a80,80,0,1,1,127.7,0,8,8,0,0,1-12.76-9.65,64,64,0,1,0-102.18,0,8,8,0,0,1-12.76,9.65Z',
             bell: 'M221.8,175.94C216.25,166.38,208,139.33,208,104a80,80,0,1,0-160,0c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0H208a16,16,0,0,0,13.8-24.06ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a64,64,0,1,1,128,0c0,36.05,8.28,66.73,16,80Z',
             'file-pdf': 'M224,152a8,8,0,0,1-8,8H192v16h16a8,8,0,0,1,0,16H192v16a8,8,0,0,1-16,0V152a8,8,0,0,1,8-8h32A8,8,0,0,1,224,152ZM92,172a28,28,0,0,1-28,28H56v8a8,8,0,0,1-16,0V152a8,8,0,0,1,8-8H64A28,28,0,0,1,92,172Zm-16,0a12,12,0,0,0-12-12H56v24h8A12,12,0,0,0,76,172Zm88,8a36,36,0,0,1-36,36H112a8,8,0,0,1-8-8V152a8,8,0,0,1,8-8h16A36,36,0,0,1,164,180Zm-16,0a20,20,0,0,0-20-20h-8v40h8A20,20,0,0,0,148,180ZM40,112V40A16,16,0,0,1,56,24h96a8,8,0,0,1,5.66,2.34l56,56A8,8,0,0,1,216,88v24a8,8,0,0,1-16,0V96H152a8,8,0,0,1-8-8V40H56v72a8,8,0,0,1-16,0ZM160,80h28.69L160,51.31Z',
@@ -2397,7 +2397,7 @@
             }).catch(() => {});
             Promise.all([
                 supabaseClient.from('announcement_log').select('id, title, body, created_at').order('created_at', { ascending: false }).limit(3),
-                supabaseClient.from('band_events').select('id, event_name, event_type, date, time, location').gte('date', athensNowParts().date).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
+                supabaseClient.from('band_events').select('id, event_name, event_type, date, time, end_time, location').gte('date', athensNowParts().date).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
             ]).then(async ([{ data: announcements, error: aErr }, { data: events, error: eErr }]) => {
                 if (aErr || eErr) return;
                 homeTabCache = { announcements: announcements || [], events: events || [], firstName: greetingFirstName() };
@@ -2486,6 +2486,20 @@
             const match = raw.match(/^(\d{1,2}):(\d{2})/);
             if (!match) return raw;
             return `${match[1].padStart(2, '0')}:${match[2]}`;
+        }
+
+        function formatEventClockRange(ev) {
+            const start = formatEventTime(ev?.time);
+            const end = formatEventTime(ev?.end_time);
+            if (start && end) return `${start}–${end}`;
+            return start;
+        }
+
+        function formatEventWhen(ev) {
+            const date = formatGreekDateOnly(ev?.date);
+            const clock = formatEventClockRange(ev);
+            if (clock) return `${date}, ${clock}`;
+            return `${date} (Ώρα αναμένεται)`;
         }
 
         function relationName(rel) {
@@ -2937,7 +2951,7 @@
                     <section class="bg-gradient-to-br from-indigo-700 to-indigo-900 p-4 rounded-2xl shadow-lg mb-4">
                         <p class="text-xs text-indigo-200 font-semibold tracking-wide">ΕΠΟΜΕΝΗ ΕΚΔΗΛΩΣΗ</p>
                         <h2 class="text-xl font-bold text-white mt-1">${escapeHtml(nextEvent.event_name)}</h2>
-                        <p class="text-sm text-indigo-100 mt-2">${uiIconText('calendar-dots', `${escapeHtml(formatGreekDateOnly(nextEvent.date))}${nextEvent.time ? ` · ${escapeHtml(formatEventTime(nextEvent.time))}` : ''}`)}</p>
+                        <p class="text-sm text-indigo-100 mt-2">${uiIconText('calendar-dots', `${escapeHtml(formatGreekDateOnly(nextEvent.date))}${formatEventClockRange(nextEvent) ? ` · ${escapeHtml(formatEventClockRange(nextEvent))}` : ''}`)}</p>
                         ${nextEvent.location ? `<p class="text-xs text-indigo-200 mt-1">${uiIconText('map-pin', formatEventLocation(nextEvent.location))}</p>` : ''}
                         <button onclick="switchTab('events')" class="mt-3 bg-white/15 hover:bg-white/25 px-3 py-2 rounded-lg text-xs font-semibold text-white">Προβολή προγράμματος</button>
                     </section>
@@ -2988,7 +3002,7 @@
                 try {
                     const [{ data: liveAnnouncements, error: announcementsError }, { data: liveEvents, error: eventsError }] = await Promise.all([
                         supabaseClient.from('announcement_log').select('id, title, body, created_at').order('created_at', { ascending: false }).limit(3),
-                        supabaseClient.from('band_events').select('id, event_name, event_type, date, time, location').gte('date', athensNowParts().date).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
+                        supabaseClient.from('band_events').select('id, event_name, event_type, date, time, end_time, location').gte('date', athensNowParts().date).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
                     ]);
                     if (!announcementsError && !eventsError) {
                         announcements = liveAnnouncements || [];
@@ -4869,8 +4883,7 @@
                 const renderEventCards = (list) => list.map(ev => {
                     const myResp = responses?.find(r => r.event_id === ev.id);
                     const myStatus = myResp ? myResp.status : null;
-                    const formattedDate = formatGreekDateOnly(ev.date);
-                    const dateTimeDisplay = ev.time ? `${formattedDate}, ${escapeHtml(formatEventTime(ev.time))}` : `${formattedDate} (Ώρα αναμένεται)`;
+                    const dateTimeDisplay = escapeHtml(formatEventWhen(ev));
                     const locationHtml = ev.location
                         ? formatEventLocation(ev.location)
                         : escapeHtml('Θα ανακοινωθεί');
@@ -4881,10 +4894,10 @@
                     let statusLabel = '<span class="text-slate-400">Κατάσταση: <b class="text-slate-300">Χωρίς απάντηση</b></span>';
                     if (myStatus === 'Going') {
                         goingBtnClass += "bg-emerald-600 text-white ring-2 ring-white shadow-md font-bold";
-                        notGoingBtnClass += "bg-slate-800 text-slate-500 border border-slate-700 opacity-40 hover:opacity-100";
+                        notGoingBtnClass += "bg-slate-800 text-red-300 border border-red-800";
                         statusLabel = `<span class="text-slate-400 inline-flex items-center gap-1 flex-wrap">Κατάσταση: <b class="text-emerald-400 inline-flex items-center gap-1">${uiIcon('check-circle')} Θα είμαι εκεί</b></span>`;
                     } else if (myStatus === 'Not Going') {
-                        goingBtnClass += "bg-slate-800 text-slate-500 border border-slate-700 opacity-40 hover:opacity-100";
+                        goingBtnClass += "bg-slate-800 text-emerald-300 border border-emerald-800";
                         notGoingBtnClass += "bg-red-600 text-white ring-2 ring-white shadow-md font-bold";
                         statusLabel = `<span class="text-slate-400 inline-flex items-center gap-1 flex-wrap">Κατάσταση: <b class="text-red-400 inline-flex items-center gap-1">${uiIcon('x-circle')} Δεν μπορώ</b> <span class="text-[10px] italic font-normal">(${myResp.excuse || 'Χωρίς αιτιολογία'})</span></span>`;
                     } else {
@@ -4936,14 +4949,18 @@
                         <h3 class="font-bold text-sm text-indigo-400 mb-3">Διαχειριστής: Νέα Εκδήλωση</h3>
                         <input type="text" id="e-name" placeholder="Όνομα (π.χ., Λιτανεία · για πρόβα βάλτε τη λέξη πρόβα στον τίτλο)" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
                         <input type="text" id="e-type" placeholder="Τύπος (π.χ., Παρέλαση, Πρόβα, Συναυλία)" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                        <div class="mb-2">
+                            <label class="text-[10px] text-slate-400 block mb-1">Ημερομηνία (YYYY-MM-DD)</label>
+                            <input type="date" id="e-date" class="w-full p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                        </div>
                         <div class="grid grid-cols-2 gap-2 mb-2">
                             <div>
-                                <label class="text-[10px] text-slate-400 block mb-1">Ημερομηνία (YYYY-MM-DD)</label>
-                                <input type="date" id="e-date" class="w-full p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                                <label class="text-[10px] text-slate-400 block mb-1">Ώρα έναρξης (προαιρετικό)</label>
+                                <input type="text" id="e-time" placeholder="π.χ. 18:30" class="w-full p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
                             </div>
                             <div>
-                                <label class="text-[10px] text-slate-400 block mb-1">Ώρα (Προαιρετικό, π.χ. 18:30)</label>
-                                <input type="text" id="e-time" placeholder="π.χ. 18:30" class="w-full p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
+                                <label class="text-[10px] text-slate-400 block mb-1">Ώρα λήξης (προαιρετικό)</label>
+                                <input type="text" id="e-end" placeholder="π.χ. 20:30" class="w-full p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
                             </div>
                         </div>
                         <input type="text" id="e-loc" placeholder="Τοποθεσία | URL (π.χ., Συνεδριακό | https://maps...)" class="w-full mb-2 p-2.5 bg-slate-900 border border-slate-700 rounded text-sm text-white">
@@ -5057,8 +5074,7 @@
                         const pendingList = musicianProfiles
                             .filter(p => !answeredEmails.has(String(p.email || '').trim().toLowerCase()))
                             .sort((a, b) => `${a.last_name || ''} ${a.first_name || ''}`.localeCompare(`${b.last_name || ''} ${b.first_name || ''}`, 'el', { sensitivity: 'base' }));
-                        const formattedDate = formatGreekDateOnly(ev.date);
-                        const dateTimeDisplay = ev.time ? `${formattedDate}, ${escapeHtml(formatEventTime(ev.time))}` : `${formattedDate} (Ώρα αναμένεται)`;
+                        const dateTimeDisplay = escapeHtml(formatEventWhen(ev));
                         const typeBadge = ev.event_type ? `<span class="shrink-0 max-w-[42%] text-right bg-slate-700 text-indigo-300 px-2 py-0.5 rounded text-[10px] font-semibold whitespace-pre-line leading-tight">${escapeHtml(ev.event_type)}</span>` : '';
                         const rsvpLocked = eventRsvpLocked(ev);
                         const eventOver = eventHasEnded(ev);
@@ -5360,14 +5376,26 @@
             return Math.round((Date.parse(`${eventDate}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000);
         }
 
+        function nextYmd(ymd) {
+            const parts = String(ymd || '').split('-').map(Number);
+            if (parts.length !== 3 || parts.some((n) => !n)) return ymd;
+            const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+            dt.setUTCDate(dt.getUTCDate() + 1);
+            return dt.toISOString().slice(0, 10);
+        }
+
         function eventHasEnded(ev) {
             if (!ev?.date) return true;
             const now = athensNowParts();
             const eventDate = String(ev.date).split('T')[0];
-            if (eventDate < now.date) return true;
-            if (eventDate > now.date) return false;
-            const eventTime = ev.time ? String(ev.time).slice(0, 5) : '23:59';
-            return eventTime <= now.hm;
+            const start = formatEventTime(ev.time) || '23:59';
+            const end = formatEventTime(ev.end_time);
+            let endDate = eventDate;
+            let endHm = end || start;
+            if (end && end < start) endDate = nextYmd(eventDate);
+            if (now.date > endDate) return true;
+            if (now.date < endDate) return false;
+            return endHm <= now.hm;
         }
 
         function eventRsvpLocked(ev) {
@@ -5622,12 +5650,19 @@
             const event_name = document.getElementById('e-name').value;
             const event_type = document.getElementById('e-type').value;
             const date = document.getElementById('e-date').value;
-            const time = document.getElementById('e-time').value;
+            const time = document.getElementById('e-time').value.trim();
+            const end_time = document.getElementById('e-end')?.value.trim() || '';
             const location = document.getElementById('e-loc').value;
             const dress_code = document.getElementById('e-dress').value;
             const notes = document.getElementById('e-notes').value;
 
-            const { error } = await supabaseClient.from('band_events').insert([{ event_name, event_type, date, time, location, dress_code, notes }]);
+            const row = { event_name, event_type, date, time, location, dress_code, notes };
+            if (end_time) row.end_time = end_time;
+            let { error } = await supabaseClient.from('band_events').insert([row]);
+            if (error && end_time && /end_time/i.test(error.message || '')) {
+                delete row.end_time;
+                ({ error } = await supabaseClient.from('band_events').insert([row]));
+            }
             if (error) showAppNotice(error.message);
             else {
                 showAppNotice('Η εκδήλωση προστέθηκε!');
@@ -6023,7 +6058,7 @@
             try {
 
             const [{ data: events }, { profiles }, { data: responses }] = await Promise.all([
-                supabaseClient.from('band_events').select('id, event_name, event_type, date, time'),
+                supabaseClient.from('band_events').select('id, event_name, event_type, date, time, end_time'),
                 loadProfilesWithAssignments(),
                 supabaseClient.from('event_responses').select('event_id, user_email, status, excuse, actual_attendance')
             ]);
@@ -6065,7 +6100,7 @@
                 perEvent.push([
                     ev.event_name || '',
                     ev.date ? String(ev.date).split('T')[0] : '',
-                    formatEventTime(ev.time),
+                    formatEventClockRange(ev),
                     present,
                     absent
                 ]);
@@ -6097,7 +6132,7 @@
                     detail.push([
                         ev.event_name || '',
                         ev.date ? String(ev.date).split('T')[0] : '',
-                        formatEventTime(ev.time),
+                        formatEventClockRange(ev),
                         musicianFullName(p, email),
                         profilePrimaryInstrumentLabel(p),
                         rsvpStatusLabel(row?.status),
