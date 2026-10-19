@@ -2335,7 +2335,7 @@
                 try { await supabaseClient.auth.refreshSession(); } catch (e) {}
                 musicQuery = await viaRpc();
             }
-            if (!musicQuery.error && Array.isArray(musicQuery.data)) {
+            if (!musicQuery.error && Array.isArray(musicQuery.data) && musicQuery.data.length) {
                 return { error: null, music: sortRows(musicQuery.data) };
             }
             const cols = 'id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id';
