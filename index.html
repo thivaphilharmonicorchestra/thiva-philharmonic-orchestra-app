@@ -2328,23 +2328,13 @@
         }
 
         async function fetchLiveMusicLibrary() {
-            const sortRows = (rows) => [...rows].sort((a, b) => (a.id || 0) - (b.id || 0));
-            const viaRpc = () => supabaseClient.rpc('my_music_library');
-            let musicQuery = await viaRpc();
-            if (musicQuery.error) {
-                try { await supabaseClient.auth.refreshSession(); } catch (e) {}
-                musicQuery = await viaRpc();
-            }
-            if (!musicQuery.error && Array.isArray(musicQuery.data) && musicQuery.data.length) {
-                return { error: null, music: sortRows(musicQuery.data) };
-            }
             const cols = 'id, piece_title, composer, concert_set, instrument_part, pdf_link, musical_part_id';
             const run = () => supabaseClient
                 .from('music_library')
                 .select(cols)
                 .order('id', { ascending: true })
                 .range(0, 999);
-            musicQuery = await run();
+            let musicQuery = await run();
             if (musicQuery.error) {
                 try { await supabaseClient.auth.refreshSession(); } catch (e) {}
                 musicQuery = await run();
