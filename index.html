@@ -1142,6 +1142,10 @@
             const gen = ++tabLoadGen;
             const watchdog = setTimeout(() => {
                 if (gen !== tabLoadGen || isPdfViewerOpen() || requirePasswordSetup) return;
+                if (document.querySelector('#content .tab-scroll') || document.getElementById('music-results')) {
+                    setTabLoading(false);
+                    return;
+                }
                 window.location.reload();
             }, TAB_LOAD_RELOAD_MS);
             try {
@@ -1204,6 +1208,7 @@
             'x-circle': 'M165.66,101.66,139.31,128l26.35,26.34a8,8,0,0,1-11.32,11.32L128,139.31l-26.34,26.35a8,8,0,0,1-11.32-11.32L116.69,128,90.34,101.66a8,8,0,0,1,11.32-11.32L128,116.69l26.34-26.35a8,8,0,0,1,11.32,11.32ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z',
             check: 'M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z',
             x: 'M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z',
+            'arrow-square-up-right': 'M200,64V168a8,8,0,0,1-16,0V83.31L69.66,197.66a8,8,0,0,1-11.32-11.32L172.69,72H88a8,8,0,0,1,0-16H192A8,8,0,0,1,200,64Z',
             'cell-tower': 'M135.16,84.42a8,8,0,0,0-14.32,0l-72,144a8,8,0,0,0,14.31,7.16L77,208h102.1l13.79,27.58A8,8,0,0,0,200,240a8,8,0,0,0,7.15-11.58ZM128,105.89,155.06,160H100.94ZM85,192l8-16h70.1l8,16Zm74.54-98.26a32,32,0,1,0-63,0,8,8,0,1,1-15.74,2.85,48,48,0,1,1,94.46,0,8,8,0,0,1-7.86,6.58,8.74,8.74,0,0,1-1.43-.13A8,8,0,0,1,159.49,93.74ZM64.15,136.21a80,80,0,1,1,127.7,0,8,8,0,0,1-12.76-9.65,64,64,0,1,0-102.18,0,8,8,0,0,1-12.76,9.65Z',
             bell: 'M221.8,175.94C216.25,166.38,208,139.33,208,104a80,80,0,1,0-160,0c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0H208a16,16,0,0,0,13.8-24.06ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a64,64,0,1,1,128,0c0,36.05,8.28,66.73,16,80Z',
             'file-pdf': 'M224,152a8,8,0,0,1-8,8H192v16h16a8,8,0,0,1,0,16H192v16a8,8,0,0,1-16,0V152a8,8,0,0,1,8-8h32A8,8,0,0,1,224,152ZM92,172a28,28,0,0,1-28,28H56v8a8,8,0,0,1-16,0V152a8,8,0,0,1,8-8H64A28,28,0,0,1,92,172Zm-16,0a12,12,0,0,0-12-12H56v24h8A12,12,0,0,0,76,172Zm88,8a36,36,0,0,1-36,36H112a8,8,0,0,1-8-8V152a8,8,0,0,1,8-8h16A36,36,0,0,1,164,180Zm-16,0a20,20,0,0,0-20-20h-8v40h8A20,20,0,0,0,148,180ZM40,112V40A16,16,0,0,1,56,24h96a8,8,0,0,1,5.66,2.34l56,56A8,8,0,0,1,216,88v24a8,8,0,0,1-16,0V96H152a8,8,0,0,1-8-8V40H56v72a8,8,0,0,1-16,0ZM160,80h28.69L160,51.31Z',
@@ -2341,6 +2346,16 @@
             return { error: null, music: musicQuery.data };
         }
 
+        function withTimeout(promise, ms, label) {
+            return new Promise((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error(label || 'timeout')), ms);
+                promise.then(
+                    (value) => { clearTimeout(timer); resolve(value); },
+                    (err) => { clearTimeout(timer); reject(err); }
+                );
+            });
+        }
+
         function musicLibrarySignature(list) {
             return (list || []).map((item) => `${item.id}:${item.pdf_link || ''}`).sort().join('|');
         }
@@ -2840,7 +2855,7 @@
         function switchTab(tab) {
             if (tab === activeTab) {
                 if (tab === 'music' && navigator.onLine !== false) {
-                    setTabLoading(true);
+                    if (!document.getElementById('music-results')) setTabLoading(true);
                     runTabLoad(renderMusicTab);
                 }
                 return;
@@ -3089,59 +3104,71 @@
         }
 
         // --- MUSIC TAB ---
+        async function refreshMusicLibraryFromServer() {
+            if (navigator.onLine === false) return false;
+            try {
+                const live = await withTimeout(fetchLiveMusicLibrary(), 12000, 'music-list-timeout');
+                if (live.error || !Array.isArray(live.music)) return false;
+                applyMusicLibrary(live.music);
+                if (activeTab !== 'music') return true;
+                await refreshOfflinePdfFlags();
+                const content = document.getElementById('content');
+                const banner = document.getElementById('music-offline-banner');
+                if (banner) banner.classList.add('hidden');
+                if (!document.getElementById('music-results') && content) {
+                    await buildMusicTabShell(content, musicLibraryCache, { fromOfflineCache: false });
+                    musicTabShellReady = true;
+                }
+                paintMusicResults();
+                prefetchEntitledPdfs(musicLibraryCache);
+                return true;
+            } catch (e) {
+                console.warn('refreshMusicLibraryFromServer', e);
+                return false;
+            }
+        }
+
         async function renderMusicTab() {
             const content = document.getElementById('content');
             let keepShell = musicTabShellReady && document.getElementById('music-results');
-
-            let music = null;
-            let loadError = null;
             let fromOfflineCache = false;
 
+            if (!musicLibraryCache.length) {
+                const snap = await scoresGetMeta(currentUser?.id);
+                if (Array.isArray(snap?.library) && snap.library.length) {
+                    musicLibraryCache = snap.library;
+                    fromOfflineCache = true;
+                }
+            }
+
             if (!keepShell && musicLibraryCache.length && activeTab === 'music') {
-                await buildMusicTabShell(content, musicLibraryCache, { fromOfflineCache: navigator.onLine === false });
+                await buildMusicTabShell(content, musicLibraryCache, { fromOfflineCache: fromOfflineCache || navigator.onLine === false });
                 musicTabShellReady = true;
                 keepShell = true;
                 paintMusicResults();
             }
 
             if (navigator.onLine !== false) {
-                try {
-                    const live = await fetchLiveMusicLibrary();
-                    if (live.error) loadError = live.error;
-                    else music = live.music;
-                } catch (e) {
-                    loadError = e;
-                    console.warn('renderMusicTab', e);
+                if (keepShell) {
+                    refreshMusicLibraryFromServer();
+                    return;
                 }
+                const ok = await refreshMusicLibraryFromServer();
+                if (ok) return;
             }
 
-            if (!music) {
-                const snap = await scoresGetMeta(currentUser?.id);
-                if (Array.isArray(snap?.library) && snap.library.length) {
-                    music = snap.library;
-                    fromOfflineCache = true;
-                }
-            }
-
-            if (!music) {
-                if (activeTab !== 'music') return;
-                musicTabShellReady = false;
-                content.innerHTML = `<p class="text-slate-400 text-sm">Δεν υπάρχουν αποθηκευμένες παρτιτούρες σε αυτή τη συσκευή.</p>`;
+            if (musicLibraryCache.length && activeTab === 'music' && !document.getElementById('music-results')) {
+                await buildMusicTabShell(content, musicLibraryCache, { fromOfflineCache: true });
+                musicTabShellReady = true;
+                paintMusicResults();
                 return;
             }
 
-            applyMusicLibrary(music || [], { fromOfflineCache });
-            if (activeTab !== 'music') return;
-            await refreshOfflinePdfFlags();
-            if (!keepShell) {
-                await buildMusicTabShell(content, musicLibraryCache, { fromOfflineCache });
-                musicTabShellReady = true;
-            } else {
-                const banner = document.getElementById('music-offline-banner');
-                if (banner) banner.classList.toggle('hidden', !fromOfflineCache);
+            if (!musicLibraryCache.length) {
+                if (activeTab !== 'music') return;
+                musicTabShellReady = false;
+                content.innerHTML = `<p class="text-slate-400 text-sm">Δεν υπάρχουν αποθηκευμένες παρτιτούρες σε αυτή τη συσκευή.</p>`;
             }
-            paintMusicResults();
-            prefetchEntitledPdfs(musicLibraryCache);
         }
 
         function filteredMusicRows() {
@@ -4346,21 +4373,23 @@
             }).join(zeroWidthJoiner);
         }
 
-        function formatEventLocation(location) {
+        function formatEventLocation(location, className = 'text-indigo-300') {
             if (!location) return '';
+            const linkClass = `${className} font-medium underline underline-offset-2 inline-flex items-center gap-1 max-w-full`;
+            const icon = uiIcon('arrow-square-up-right', 'h-3.5 w-3.5 shrink-0');
             if (location.includes('|')) {
                 const parts = location.split('|');
                 const locName = parts.shift().trim();
                 const locUrl = parts.join('|').trim();
                 const safeUrl = safeExternalUrl(locUrl);
                 return safeUrl
-                    ? `<a href="${safeUrl}" rel="noopener noreferrer" target="_blank" class="text-indigo-200 hover:underline">${escapeHtml(locName)}</a>`
+                    ? `<a href="${safeUrl}" rel="noopener noreferrer" target="_blank" class="${linkClass}">${escapeHtml(locName)}${icon}</a>`
                     : escapeHtml(location);
             }
             if (location.startsWith('http://') || location.startsWith('https://')) {
                 const safeUrl = safeExternalUrl(location);
                 return safeUrl
-                    ? `<a href="${safeUrl}" rel="noopener noreferrer" target="_blank" class="text-indigo-200 hover:underline">Χάρτης</a>`
+                    ? `<a href="${safeUrl}" rel="noopener noreferrer" target="_blank" class="${linkClass}">Χάρτης${icon}</a>`
                     : escapeHtml(location);
             }
             return escapeHtml(location);
@@ -4842,13 +4871,9 @@
                     const myStatus = myResp ? myResp.status : null;
                     const formattedDate = formatGreekDateOnly(ev.date);
                     const dateTimeDisplay = ev.time ? `${formattedDate}, ${escapeHtml(formatEventTime(ev.time))}` : `${formattedDate} (Ώρα αναμένεται)`;
-                    let locationHtml = escapeHtml(ev.location || 'Θα ανακοινωθεί');
-                    if (ev.location && ev.location.includes('|')) {
-                        const parts = ev.location.split('|');
-                        locationHtml = `<a href="${safeExternalUrl(parts[1].trim())}" rel="noopener noreferrer" target="_blank" class="text-indigo-400 hover:underline font-medium inline-flex items-center">${escapeHtml(parts[0].trim())}</a>`;
-                    } else if (ev.location && (ev.location.startsWith('http://') || ev.location.startsWith('https://'))) {
-                        locationHtml = `<a href="${safeExternalUrl(ev.location)}" rel="noopener noreferrer" target="_blank" class="text-indigo-400 hover:underline">Χάρτης</a>`;
-                    }
+                    const locationHtml = ev.location
+                        ? formatEventLocation(ev.location)
+                        : escapeHtml('Θα ανακοινωθεί');
                     const typeBadge = ev.event_type ? `<span class="shrink-0 max-w-[42%] text-right bg-slate-700 text-indigo-300 px-2 py-0.5 rounded text-[10px] font-semibold whitespace-pre-line leading-tight">${escapeHtml(ev.event_type)}</span>` : '';
                     const rsvpLocked = eventRsvpLocked(ev);
                     let goingBtnClass = "px-3 py-1.5 rounded text-xs font-semibold transition ";
@@ -5053,9 +5078,11 @@
                         const staffRsvpBtns = (email, currentStatus) => {
                             const encoded = encodeURIComponent(String(email || '').trim().toLowerCase());
                             if (!rsvpLocked || eventOver) return '';
-                            return `<div class="mt-1 space-x-2">
-                                ${currentStatus !== 'Going' ? `<button type="button" onclick="staffSetRsvp(${ev.id}, '${encoded}', 'Going')" class="text-[10px] text-emerald-300 underline">Θα είναι</button>` : ''}
-                                ${currentStatus !== 'Not Going' ? `<button type="button" onclick="staffSetRsvp(${ev.id}, '${encoded}', 'Not Going')" class="text-[10px] text-red-300 underline">Δεν μπορεί</button>` : ''}
+                            const goingOn = currentStatus === 'Going';
+                            const notOn = currentStatus === 'Not Going';
+                            return `<div class="flex items-center gap-1.5 shrink-0">
+                                <button type="button" onclick="staffSetRsvp(${ev.id}, '${encoded}', 'Going')" class="att-mark att-mark-yes${goingOn ? ' on' : ''}" aria-label="Θα είναι εκεί" aria-pressed="${goingOn ? 'true' : 'false'}">${uiIcon('check', 'h-4 w-4')}</button>
+                                <button type="button" onclick="staffSetRsvp(${ev.id}, '${encoded}', 'Not Going')" class="att-mark att-mark-no${notOn ? ' on' : ''}" aria-label="Δεν μπορεί" aria-pressed="${notOn ? 'true' : 'false'}">${uiIcon('x', 'h-4 w-4')}</button>
                             </div>`;
                         };
                         const actualBtns = (email, actual) => {
@@ -5075,7 +5102,7 @@
                                           goingList.map(r => {
                                             const profile = profilesByEmail.get(String(r.user_email || '').trim().toLowerCase());
                                             const instrument = attendanceInstrumentSuffix(profile);
-                                            return `<div class="text-slate-300 mb-1">• ${escapeHtml(personName(r.user_email, profile))}${escapeHtml(instrument)}${staffRsvpBtns(r.user_email, 'Going')}</div>`;
+                                            return `<div class="flex items-start justify-between gap-2 text-slate-300 mb-1">• <span class="min-w-0 flex-1">${escapeHtml(personName(r.user_email, profile))}${escapeHtml(instrument)}</span>${staffRsvpBtns(r.user_email, 'Going')}</div>`;
                                           }).join('')}
                                     </div>
                                     <div class="bg-slate-900 p-2.5 rounded border border-slate-700/60">
@@ -5084,7 +5111,10 @@
                                           notGoingList.map(r => {
                                             const profile = profilesByEmail.get(String(r.user_email || '').trim().toLowerCase());
                                             const instrument = attendanceInstrumentSuffix(profile);
-                                            return `<div class="text-slate-300 mb-1">• <b>${escapeHtml(personName(r.user_email, profile))}${escapeHtml(instrument)}</b><br><span class="text-[10px] text-slate-400 italic">"${escapeHtml(r.excuse || 'Χωρίς αιτιολογία')}"</span>${staffRsvpBtns(r.user_email, 'Not Going')}</div>`;
+                                            return `<div class="flex items-start justify-between gap-2 text-slate-300 mb-1">
+                                                <div class="min-w-0 flex-1">• <b>${escapeHtml(personName(r.user_email, profile))}${escapeHtml(instrument)}</b><br><span class="text-[10px] text-slate-400 italic">"${escapeHtml(r.excuse || 'Χωρίς αιτιολογία')}"</span></div>
+                                                ${staffRsvpBtns(r.user_email, 'Not Going')}
+                                            </div>`;
                                           }).join('')}
                                     </div>
                                 </div>
@@ -5093,7 +5123,7 @@
                                     ${pendingList.length === 0 ? '<span class="text-slate-500 italic">Κανείς</span>' :
                                       pendingList.map(profile => {
                                         const instrument = attendanceInstrumentSuffix(profile);
-                                        return `<div class="text-slate-300 mb-1">• ${escapeHtml(personName(profile.email, profile))}${escapeHtml(instrument)}${staffRsvpBtns(profile.email, null)}</div>`;
+                                        return `<div class="flex items-start justify-between gap-2 text-slate-300 mb-1">• <span class="min-w-0 flex-1">${escapeHtml(personName(profile.email, profile))}${escapeHtml(instrument)}</span>${staffRsvpBtns(profile.email, null)}</div>`;
                                       }).join('')}
                                 </div>`;
                         const rollCall = eventOver ? `
