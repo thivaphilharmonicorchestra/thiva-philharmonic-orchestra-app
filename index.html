@@ -4006,6 +4006,25 @@
             }
         }
 
+        function downloadPdfFile(file) {
+            const url = URL.createObjectURL(file);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = file.name;
+            a.rel = 'noopener';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        function shareGestureLost(error) {
+            const name = String(error?.name || '');
+            const message = String(error?.message || '');
+            return name === 'NotAllowedError'
+                || /permission denied|user gesture|not allowed/i.test(message);
+        }
+
         async function shareSheetPdf(filePath, titleText, pieceId) {
             if (pdfShareBusy || pdfOpenBusy) return;
             pdfShareBusy = true;
@@ -4013,16 +4032,19 @@
             try { title = decodeURIComponent(title); } catch {}
             try {
                 const file = await fetchSignedPdfFile(filePath, title, pieceId);
-                if (navigator.share && navigator.canShare?.({ files: [file] })) {
-                    await navigator.share({ files: [file], title, text: title });
-                    return;
+                const canFiles = Boolean(navigator.share && navigator.canShare?.({ files: [file] }));
+                const gestureOk = navigator.userActivation ? navigator.userActivation.isActive : true;
+                if (canFiles && gestureOk) {
+                    try {
+                        await navigator.share({ files: [file], title, text: title });
+                        return;
+                    } catch (e) {
+                        if (e?.name === 'AbortError') return;
+                        if (!shareGestureLost(e)) throw e;
+                    }
                 }
-                const url = URL.createObjectURL(file);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = file.name;
-                a.click();
-                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                downloadPdfFile(file);
+                showAppNotice('Το PDF αποθηκεύτηκε στις Λήψεις. Από εκεί μπορείτε να το κοινοποιήσετε.');
             } catch (e) {
                 if (e?.name !== 'AbortError') {
                     showAppNotice('Αδυναμία κοινοποίησης: ' + (e.message || 'Άγνωστο σφάλμα'));
