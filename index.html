@@ -2506,12 +2506,14 @@
                 if (latest && !latest.error) regulationsMetaCache = latest;
             }).catch(() => {});
             Promise.all([
-                supabaseClient.from('announcement_log').select('id, title, body, created_at').order('created_at', { ascending: false }).limit(3),
+                supabaseClient.from('announcement_log').select('id, title, body, sent_by_email, created_at').order('created_at', { ascending: false }),
                 supabaseClient.from('band_events').select('id, event_name, event_type, date, time, end_time, location').gte('date', athensNowParts().date).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
             ]).then(async ([{ data: announcements, error: aErr }, { data: events, error: eErr }]) => {
                 if (aErr || eErr) return;
+                notificationsTabCache = announcements || [];
                 homeTabCache = { announcements: announcements || [], events: events || [], firstName: greetingFirstName() };
                 await writeTabSnapshot('home', homeTabCache);
+                await writeTabSnapshot('notifications', { announcements: notificationsTabCache });
             }).catch(() => {});
             supabaseClient.from('band_events').select('*').order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
                 .then(async ({ data: events, error }) => {
@@ -2523,12 +2525,6 @@
                     }
                     eventsTabCache = { events, responses };
                     await writeTabSnapshot('events', { events, responses });
-                }).catch(() => {});
-            supabaseClient.from('announcement_log').select('id, title, body, sent_by_email, created_at').order('created_at', { ascending: false })
-                .then(async ({ data, error }) => {
-                    if (error || !data) return;
-                    notificationsTabCache = data;
-                    await writeTabSnapshot('notifications', { announcements: data });
                 }).catch(() => {});
             if (isAdminRole()) {
                 buildAdminAssignmentPanel().then((html) => {
@@ -2995,7 +2991,7 @@
 
         function applyLocationHash() {
             const h = window.location.hash;
-            if (h === '#notifications') activeTab = 'notifications';
+            if (h === '#notifications') activeTab = 'home';
             else if (h === '#events') activeTab = 'events';
             else if (h === '#attendance') activeTab = 'attendance';
         }
@@ -3028,7 +3024,11 @@
             else if (activeTab === 'home') runTabLoad(renderHomeTab);
             else if (activeTab === 'attendance') runTabLoad(renderAttendanceTab);
             else if (activeTab === 'profile') runTabLoad(renderProfileTab);
-            else if (activeTab === 'notifications') runTabLoad(renderNotificationsTab);
+            else if (activeTab === 'notifications') {
+                activeTab = 'home';
+                highlightNav('home');
+                runTabLoad(renderHomeTab);
+            }
             syncInstallNudge();
             maybeOfferPushPrompt();
             consumeStashedPushOpen();
@@ -3068,12 +3068,9 @@
                 `;
             }
             html += `
-                <div class="flex items-center justify-between gap-2 mb-1">
-                    <div class="flex items-center gap-2 min-w-0">
-                        <h2 class="text-lg font-bold">Τελευταίες ανακοινώσεις</h2>
-                        ${isPrivilegedRole() && navigator.onLine !== false ? `<button type="button" onclick="openAnnouncementComposer()" class="tab-action tab-action-new">Νέα</button>` : ''}
-                    </div>
-                    <button type="button" onclick="switchTab('notifications')" class="tab-action">Όλες</button>
+                <div class="flex items-center gap-2 mb-1">
+                    <h2 class="text-lg font-bold">Ανακοινώσεις</h2>
+                    ${isPrivilegedRole() && navigator.onLine !== false ? `<button type="button" onclick="openAnnouncementComposer()" class="tab-action tab-action-new">Νέα</button>` : ''}
                 </div>
             </div>
             `;
@@ -3085,8 +3082,13 @@
                 announcements.forEach(item => {
                     html += `
                         <article role="button" tabindex="0" onclick="openAnnouncementFromList(${Number(item.id)}, event)" class="bg-slate-800 p-4 rounded-xl border border-slate-700 cursor-pointer hover:border-slate-500">
-                            <h3 class="font-bold text-base text-white">${escapeHtml(item.title)}</h3>
-                            <p class="text-xs text-slate-500 mt-1">${escapeHtml(item.created_at ? new Date(item.created_at).toLocaleString('el-GR') : '')}</p>
+                            <div class="flex items-start justify-between gap-2">
+                                <div class="min-w-0">
+                                    <h3 class="font-bold text-base text-white">${escapeHtml(item.title)}</h3>
+                                    <p class="text-xs text-slate-500 mt-1">${escapeHtml(item.created_at ? new Date(item.created_at).toLocaleString('el-GR') : '')}</p>
+                                </div>
+                                ${isPrivilegedRole() ? `<button type="button" onclick="deleteAnnouncement(${Number(item.id)})" class="tab-action tab-action-danger">Διαγραφή</button>` : ''}
+                            </div>
                             <p class="text-sm text-slate-200 mt-2 line-clamp-3 whitespace-pre-wrap">${escapeHtml(item.body)}</p>
                         </article>
                     `;
@@ -3111,7 +3113,7 @@
             if (navigator.onLine !== false) {
                 try {
                     const [{ data: liveAnnouncements, error: announcementsError }, { data: liveEvents, error: eventsError }] = await Promise.all([
-                        supabaseClient.from('announcement_log').select('id, title, body, created_at').order('created_at', { ascending: false }).limit(3),
+                        supabaseClient.from('announcement_log').select('id, title, body, sent_by_email, created_at').order('created_at', { ascending: false }),
                         supabaseClient.from('band_events').select('id, event_name, event_type, date, time, end_time, location').gte('date', athensNowParts().date).order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
                     ]);
                     if (!announcementsError && !eventsError) {
@@ -3119,7 +3121,9 @@
                         events = liveEvents || [];
                         stale = false;
                         homeTabCache = { announcements, events, firstName: greetingFirstName() };
+                        notificationsTabCache = announcements;
                         await writeTabSnapshot('home', homeTabCache);
+                        await writeTabSnapshot('notifications', { announcements });
                     }
                 } catch (e) {
                     console.warn('renderHomeTab', e);
@@ -3134,73 +3138,9 @@
         }
 
         async function renderNotificationsTab() {
-            const content = document.getElementById('content');
-
-            let announcements = Array.isArray(notificationsTabCache) ? notificationsTabCache : null;
-            let stale = false;
-            if (navigator.onLine !== false) {
-                try {
-                    const { data, error } = await supabaseClient
-                        .from('announcement_log')
-                        .select('id, title, body, sent_by_email, created_at')
-                        .order('created_at', { ascending: false });
-                    if (!error) {
-                        announcements = data || [];
-                        notificationsTabCache = announcements;
-                        await writeTabSnapshot('notifications', { announcements });
-                    }
-                } catch (e) {
-                    console.warn('renderNotificationsTab', e);
-                }
-            }
-            if (!announcements) {
-                const cached = await readTabSnapshot('notifications');
-                if (cached?.announcements) {
-                    announcements = cached.announcements;
-                    notificationsTabCache = announcements;
-                    stale = true;
-                }
-            }
-            if (activeTab !== 'notifications') return;
-            if (!announcements) {
-                content.innerHTML = `<h2 class="text-2xl font-bold mb-4">Ανακοινώσεις</h2><p class="text-slate-400 text-sm">Δεν υπάρχουν αποθηκευμένες ανακοινώσεις σε αυτή τη συσκευή.</p>`;
-                return;
-            }
-
-            let html = (stale ? staleSnapshotBanner() : '') + `
-                <div class="tab-sticky flex items-center justify-between gap-2 mb-3">
-                    <div class="flex items-center gap-2 min-w-0">
-                        <h2 class="text-2xl font-bold">Ανακοινώσεις</h2>
-                        ${isPrivilegedRole() && navigator.onLine !== false ? `<button type="button" onclick="openAnnouncementComposer()" class="tab-action tab-action-new">Νέα</button>` : ''}
-                    </div>
-                    <button type="button" onclick="switchTab('home')" class="chrome-close" aria-label="Κλείσιμο">×</button>
-                </div>
-                <div class="tab-scroll">
-            `;
-
-            if (!announcements || announcements.length === 0) {
-                html += '<div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center text-slate-400 text-sm">Δεν υπάρχουν ανακοινώσεις ακόμα.</div>';
-            } else {
-                html += '<div class="space-y-3">';
-                announcements.forEach(item => {
-                    const date = item.created_at ? new Date(item.created_at).toLocaleString('el-GR') : '';
-                    html += `
-                        <article role="button" tabindex="0" onclick="openAnnouncementFromList(${Number(item.id)}, event)" class="bg-slate-800 p-4 rounded-xl border border-slate-700 cursor-pointer hover:border-slate-500">
-                            <div class="flex items-start justify-between gap-2">
-                                <div>
-                                    <h3 class="font-bold text-base text-white">${escapeHtml(item.title)}</h3>
-                                    <p class="text-xs text-slate-500 mt-1">${escapeHtml(date)}</p>
-                                </div>
-                                ${isPrivilegedRole() ? `<button type="button" onclick="deleteAnnouncement(${Number(item.id)})" class="tab-action tab-action-danger">Διαγραφή</button>` : ''}
-                            </div>
-                            <p class="text-sm text-slate-200 mt-3 line-clamp-3 whitespace-pre-wrap">${escapeHtml(item.body)}</p>
-                        </article>
-                    `;
-                });
-                html += '</div>';
-            }
-            html += '</div>';
-            content.innerHTML = html;
+            activeTab = 'home';
+            highlightNav('home');
+            return renderHomeTab();
         }
 
         function announcementById(id) {
@@ -3238,7 +3178,11 @@
                 showAppNotice('Σφάλμα διαγραφής ανακοίνωσης: ' + error.message);
                 return;
             }
-            await renderNotificationsTab();
+            homeTabCache.announcements = (homeTabCache.announcements || []).filter((row) => Number(row.id) !== announcementId);
+            notificationsTabCache = Array.isArray(notificationsTabCache)
+                ? notificationsTabCache.filter((row) => Number(row.id) !== announcementId)
+                : notificationsTabCache;
+            await renderHomeTab();
         }
 
         // --- MUSIC TAB ---
@@ -6266,6 +6210,8 @@
                 if (titleEl) titleEl.value = '';
                 if (bodyEl) bodyEl.value = '';
                 notificationsTabCache = null;
+                if (homeTabCache) homeTabCache.announcements = null;
+                if (activeTab === 'home' || activeTab === 'notifications') await renderHomeTab();
             } catch (e) {
                 if (result) {
                     result.className = 'text-xs rounded p-2 space-y-1 mb-2 bg-red-900/40 border border-red-700/50';
