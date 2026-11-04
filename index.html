@@ -3236,9 +3236,10 @@
                     musicLibraryCache = snap.library;
                 }
             }
+            await refreshOfflinePdfFlags();
 
             if (!keepShell && musicLibraryCache.length && activeTab === 'music') {
-                await buildMusicTabShell(content, musicLibraryCache, { fromOfflineCache: false });
+                await buildMusicTabShell(content, musicLibraryCache, { fromOfflineCache: navigator.onLine === false });
                 musicTabShellReady = true;
                 keepShell = true;
                 paintMusicResults();
@@ -3246,7 +3247,11 @@
 
             if (keepShell) {
                 const ok = await refreshMusicLibraryFromServer();
-                if (!ok) setMusicListBanner(true);
+                if (!ok) {
+                    setMusicListBanner(true);
+                    await refreshOfflinePdfFlags();
+                    paintMusicResults();
+                }
                 return;
             }
             const ok = await refreshMusicLibraryFromServer();
@@ -3255,6 +3260,7 @@
             if (musicLibraryCache.length && activeTab === 'music' && !document.getElementById('music-results')) {
                 await buildMusicTabShell(content, musicLibraryCache, { fromOfflineCache: true });
                 musicTabShellReady = true;
+                await refreshOfflinePdfFlags();
                 paintMusicResults();
                 setMusicListBanner(true);
                 return;
