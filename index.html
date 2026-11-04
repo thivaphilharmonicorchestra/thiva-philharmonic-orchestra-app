@@ -1340,6 +1340,12 @@
 
         const PUSH_OPEN_CACHE = 'thiva-philharmonic-push-open';
         let lastPushOpenKey = '';
+        function showAnnouncementDialog(title, body) {
+            const t = String(title || '').trim();
+            const b = String(body || '').trim();
+            if (!t && !b) return;
+            showAppStepsDialog(t && b ? `${t}\n\n${b}` : (t || b));
+        }
         function showPushOpenDialog(title, body) {
             const t = String(title || '').trim();
             const b = String(body || '').trim();
@@ -1348,7 +1354,7 @@
             if (key === lastPushOpenKey) return;
             lastPushOpenKey = key;
             setTimeout(() => { lastPushOpenKey = ''; }, 5000);
-            showAppStepsDialog(t && b ? `${t}\n\n${b}` : (t || b));
+            showAnnouncementDialog(t, b);
         }
 
         async function consumeStashedPushOpen() {
@@ -3078,7 +3084,7 @@
                 html += '<div class="space-y-3">';
                 announcements.forEach(item => {
                     html += `
-                        <article class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                        <article role="button" tabindex="0" onclick="openAnnouncementFromList(${Number(item.id)}, event)" class="bg-slate-800 p-4 rounded-xl border border-slate-700 cursor-pointer hover:border-slate-500">
                             <h3 class="font-bold text-base text-white">${escapeHtml(item.title)}</h3>
                             <p class="text-xs text-slate-500 mt-1">${escapeHtml(item.created_at ? new Date(item.created_at).toLocaleString('el-GR') : '')}</p>
                             <p class="text-sm text-slate-200 mt-2 line-clamp-3 whitespace-pre-wrap">${escapeHtml(item.body)}</p>
@@ -3179,7 +3185,7 @@
                 announcements.forEach(item => {
                     const date = item.created_at ? new Date(item.created_at).toLocaleString('el-GR') : '';
                     html += `
-                        <article class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                        <article role="button" tabindex="0" onclick="openAnnouncementFromList(${Number(item.id)}, event)" class="bg-slate-800 p-4 rounded-xl border border-slate-700 cursor-pointer hover:border-slate-500">
                             <div class="flex items-start justify-between gap-2">
                                 <div>
                                     <h3 class="font-bold text-base text-white">${escapeHtml(item.title)}</h3>
@@ -3187,7 +3193,7 @@
                                 </div>
                                 ${isPrivilegedRole() ? `<button type="button" onclick="deleteAnnouncement(${Number(item.id)})" class="tab-action tab-action-danger">Διαγραφή</button>` : ''}
                             </div>
-                            <p class="text-sm text-slate-200 mt-3 whitespace-pre-wrap">${escapeHtml(item.body)}</p>
+                            <p class="text-sm text-slate-200 mt-3 line-clamp-3 whitespace-pre-wrap">${escapeHtml(item.body)}</p>
                         </article>
                     `;
                 });
@@ -3195,6 +3201,20 @@
             }
             html += '</div>';
             content.innerHTML = html;
+        }
+
+        function announcementById(id) {
+            const nid = Number(id);
+            const homeList = Array.isArray(homeTabCache?.announcements) ? homeTabCache.announcements : [];
+            const allList = Array.isArray(notificationsTabCache) ? notificationsTabCache : [];
+            return homeList.concat(allList).find((row) => Number(row.id) === nid) || null;
+        }
+
+        function openAnnouncementFromList(id, ev) {
+            if (ev && ev.target && ev.target.closest && ev.target.closest('.tab-action-danger')) return;
+            const item = announcementById(id);
+            if (!item) return;
+            showAnnouncementDialog(item.title, item.body);
         }
 
         async function deleteAnnouncement(id) {
