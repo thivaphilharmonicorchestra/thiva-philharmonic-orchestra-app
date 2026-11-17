@@ -1409,6 +1409,8 @@
         let homeTabCache = { announcements: null, events: null };
         let notificationsTabCache = null;
         let attendanceTabCache = null;
+        let memberAttendanceKind = 'all';
+        let memberAttendanceMonth = '';
         let regulationsMetaCache = { date: '', path: '' };
         let adminAssignmentsHtmlCache = '';
         let cachedGreetingName = '';
@@ -5396,6 +5398,7 @@
                         const typeBadge = ev.event_type ? `<span class="shrink-0 max-w-[42%] text-right bg-slate-700 text-indigo-300 px-2 py-0.5 rounded text-[10px] font-semibold whitespace-pre-line leading-tight">${escapeHtml(ev.event_type)}</span>` : '';
                         const rsvpLocked = eventRsvpLocked(ev);
                         const eventOver = eventHasEnded(ev);
+                        const rollCallOpen = attendanceRollCallOpen(ev);
                         const responseByEmail = new Map(
                             eventResponses.map(r => [String(r.user_email || '').trim().toLowerCase(), r])
                         );
@@ -5452,7 +5455,7 @@
                                           }).join('')}
                                     </div>
                                 </div>
-                                <div class="bg-slate-900 p-2.5 rounded border border-slate-700/60 text-xs ${eventOver ? 'mb-3' : ''}">
+                                <div class="bg-slate-900 p-2.5 rounded border border-slate-700/60 text-xs ${rollCallOpen ? 'mb-3' : ''}">
                                     <span class="text-slate-300 font-semibold block mb-1">Χωρίς δήλωση (${pendingList.length})</span>
                                     ${pendingList.length === 0 ? '<span class="text-slate-500 italic">Κανείς</span>' :
                                       pendingList.map(profile => {
@@ -5460,7 +5463,7 @@
                                         return `<div class="flex items-start justify-between gap-2 text-slate-300 mb-1">• <span class="min-w-0 flex-1">${escapeHtml(personName(profile.email, profile))}${escapeHtml(instrument)}</span>${staffRsvpBtns(profile.email, null)}</div>`;
                                       }).join('')}
                                 </div>`;
-                        const rollCall = eventOver ? `
+                        const rollCall = rollCallOpen ? `
                                 <div class="bg-slate-900 p-2.5 rounded border border-amber-800/50 text-xs">
                                     <span class="text-amber-300 font-semibold block mb-1">Πραγματική παρουσία</span>
                                     <p class="text-[10px] text-slate-400 mb-2">Η δήλωση μένει ως έχει. Εδώ σημειώνετε ποιος ήρθε τελικά.</p>
@@ -5508,40 +5511,45 @@
                 }
             } else {
                 html += `<p class="text-xs text-slate-400 mb-4">Το προσωπικό σας ιστορικό συμμετοχών και αιτιολογιών απουσίας.</p>`;
-                
+
                 const responseByEvent = new Map((myResponses || []).map(r => [r.event_id, r]));
-                let attendedCount = 0;
-                let absentCount = 0;
-                let pendingCount = 0;
-                (events || []).forEach(ev => {
-                    const r = responseByEvent.get(ev.id);
-                    if (eventHasEnded(ev)) {
-                        if (r?.actual_attendance === 'present') attendedCount++;
-                        else if (r?.actual_attendance === 'absent') absentCount++;
-                        else pendingCount++;
-                    } else {
-                        const st = String(r?.status || '').toLowerCase();
-                        if (st === 'going') attendedCount++;
-                        else if (st === 'not going') absentCount++;
-                        else pendingCount++;
-                    }
-                });
+                const monthCap = athensNowParts().date.slice(0, 7);
+                const monthKey = memberAttendanceMonth && memberAttendanceMonth <= monthCap ? memberAttendanceMonth : monthCap;
+                const monthCounts = countMemberAttendance(events, responseByEvent, memberAttendanceKind, monthKey);
+                const totalCounts = countMemberAttendance(events, responseByEvent, memberAttendanceKind, '');
+                const kindBtn = (kind, label) => {
+                    const on = memberAttendanceKind === kind;
+                    return `<button type="button" onclick="setMemberAttendanceKind('${kind}')" class="py-2 rounded-lg text-xs font-semibold ${on ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 border border-slate-700'}">${label}</button>`;
+                };
+                const totalLabel = memberAttendanceKind === 'rehearsal' ? 'Σύνολο προβών' : (memberAttendanceKind === 'official' ? 'Σύνολο εκδηλώσεων' : 'Σύνολο');
+                const nextDisabled = monthKey >= monthCap;
 
                 html += `
-                    <div class="grid grid-cols-3 gap-2 mb-4 text-center">
+                    <div class="grid grid-cols-3 gap-2 mb-3">
+                        ${kindBtn('rehearsal', 'Πρόβες')}
+                        ${kindBtn('official', 'Εκδηλώσεις')}
+                        ${kindBtn('all', 'Όλα')}
+                    </div>
+                    <div class="flex items-center justify-between gap-2 mb-3">
+                        <button type="button" onclick="shiftMemberAttendanceMonth(-1)" class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg text-white text-xs font-semibold" aria-label="Προηγούμενος μήνας">‹</button>
+                        <span class="text-sm font-semibold text-indigo-300">${escapeHtml(greekMonthTitle(monthKey))}</span>
+                        <button type="button" onclick="shiftMemberAttendanceMonth(1)" class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg text-white text-xs font-semibold disabled:opacity-40 disabled:pointer-events-none" aria-label="Επόμενος μήνας" ${nextDisabled ? 'disabled' : ''}>›</button>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 mb-2 text-center">
                         <div class="bg-slate-800 p-3 rounded-xl border border-slate-700">
                             <span class="text-xs text-slate-400 block mb-1">Παρουσίες</span>
-                            <span class="text-lg font-bold text-emerald-400">${attendedCount}</span>
+                            <span class="text-lg font-bold text-emerald-400">${monthCounts.present}</span>
                         </div>
                         <div class="bg-slate-800 p-3 rounded-xl border border-slate-700">
                             <span class="text-xs text-slate-400 block mb-1">Απουσίες</span>
-                            <span class="text-lg font-bold text-red-400">${absentCount}</span>
+                            <span class="text-lg font-bold text-red-400">${monthCounts.absent}</span>
                         </div>
                         <div class="bg-slate-800 p-3 rounded-xl border border-slate-700">
-                            <span class="text-xs text-slate-400 block mb-1">Χωρίς απάντηση</span>
-                            <span class="text-lg font-bold text-slate-300">${pendingCount}</span>
+                            <span class="text-xs text-slate-400 block mb-1 leading-tight">Χωρίς καταχώρηση</span>
+                            <span class="text-lg font-bold text-slate-300">${monthCounts.open}</span>
                         </div>
                     </div>
+                    <p class="text-xs text-slate-400 text-center mb-4">${totalLabel}: ${totalCounts.present} παρουσίες, ${totalCounts.absent} απουσίες, ${totalCounts.open} χωρίς καταχώρηση</p>
 
                         <h3 class="font-bold text-sm text-indigo-300 mb-3">Ιστορικό Αιτιολογιών Απουσίας</h3>
                 `;
@@ -5556,13 +5564,15 @@
                         const ev = events?.find(e => e.id === resp.event_id);
                         const eventName = ev ? ev.event_name : 'Άγνωστη Εκδήλωση';
                         const eventDate = ev ? formatGreekDateOnly(ev.date) : '';
+                        const kindBadge = ev ? `<span class="shrink-0 bg-slate-700 text-indigo-300 px-2 py-0.5 rounded text-[10px] font-semibold">${isRehearsalEvent(ev) ? 'Πρόβα' : 'Εκδήλωση'}</span>` : '';
 
                         html += `
                             <div class="bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs">
-                                <div class="flex justify-between items-start mb-1">
+                                <div class="flex justify-between items-start gap-2 mb-1">
                                     <span class="font-bold text-white text-sm">${escapeHtml(eventName)}</span>
-                                    <span class="text-indigo-300">${escapeHtml(eventDate)}</span>
+                                    ${kindBadge}
                                 </div>
+                                <span class="text-indigo-300">${escapeHtml(eventDate)}</span>
                                 <p class="text-slate-400 mt-1">Αιτιολογία: <span class="text-slate-200 italic">"${escapeHtml(resp.excuse || 'Χωρίς αιτιολογία')}"</span></p>
                             </div>
                         `;
@@ -5714,6 +5724,90 @@
             if (now.date > endDate) return true;
             if (now.date < endDate) return false;
             return endHm <= now.hm;
+        }
+
+        const GREEK_MONTHS = ['Ιανουάριος', 'Φεβρουάριος', 'Μάρτιος', 'Απρίλιος', 'Μάιος', 'Ιούνιος', 'Ιούλιος', 'Αύγουστος', 'Σεπτέμβριος', 'Οκτώβριος', 'Νοέμβριος', 'Δεκέμβριος'];
+
+        function greekMonthTitle(yearMonth) {
+            const [y, m] = String(yearMonth || '').split('-');
+            const name = GREEK_MONTHS[Number(m) - 1];
+            return y && name ? `${name} ${y}` : String(yearMonth || '');
+        }
+
+        function eventYearMonth(ev) {
+            const date = ev?.date ? String(ev.date).split('T')[0] : '';
+            return date.length >= 7 ? date.slice(0, 7) : '';
+        }
+
+        function eventKindLabel(ev) {
+            return isRehearsalEvent(ev) ? 'Πρόβα' : 'Εκδήλωση';
+        }
+
+        function eventStartClock(ev) {
+            const date = ev?.date ? String(ev.date).split('T')[0] : '';
+            if (!date) return null;
+            return { date, hm: formatEventTime(ev.time) || '23:59' };
+        }
+
+        function addClockMinutes(clock, minutes) {
+            const [y, m, d] = clock.date.split('-').map(Number);
+            const [hh, mm] = clock.hm.split(':').map(Number);
+            const dt = new Date(Date.UTC(y, m - 1, d, hh, mm + minutes));
+            return { date: dt.toISOString().slice(0, 10), hm: dt.toISOString().slice(11, 16) };
+        }
+
+        function athensReached(clock) {
+            if (!clock?.date) return true;
+            const now = athensNowParts();
+            if (now.date > clock.date) return true;
+            if (now.date < clock.date) return false;
+            return now.hm >= clock.hm;
+        }
+
+        function attendanceRollCallOpen(ev) {
+            const start = eventStartClock(ev);
+            if (!start) return true;
+            return athensReached(addClockMinutes(start, 60));
+        }
+
+        function attendanceVisibleToMember(ev) {
+            if (formatEventTime(ev?.end_time)) return eventHasEnded(ev);
+            const start = eventStartClock(ev);
+            if (!start) return true;
+            return athensReached(addClockMinutes(start, 120));
+        }
+
+        function countMemberAttendance(events, responseByEvent, kind, monthKey) {
+            let present = 0;
+            let absent = 0;
+            let open = 0;
+            (events || []).forEach(ev => {
+                if (kind === 'rehearsal' && !isRehearsalEvent(ev)) return;
+                if (kind === 'official' && isRehearsalEvent(ev)) return;
+                if (monthKey && eventYearMonth(ev) !== monthKey) return;
+                if (!attendanceVisibleToMember(ev)) return;
+                const actual = responseByEvent.get(ev.id)?.actual_attendance;
+                if (actual === 'present') present++;
+                else if (actual === 'absent') absent++;
+                else open++;
+            });
+            return { present, absent, open };
+        }
+
+        function setMemberAttendanceKind(kind) {
+            if (kind !== 'rehearsal' && kind !== 'official' && kind !== 'all') return;
+            memberAttendanceKind = kind;
+            renderAttendanceTab({ quiet: true, skipFetch: true });
+        }
+
+        function shiftMemberAttendanceMonth(delta) {
+            const cap = athensNowParts().date.slice(0, 7);
+            const current = memberAttendanceMonth && memberAttendanceMonth <= cap ? memberAttendanceMonth : cap;
+            const [y, m] = current.split('-').map(Number);
+            const next = new Date(Date.UTC(y, m - 1 + delta, 1)).toISOString().slice(0, 7);
+            if (next > cap) return;
+            memberAttendanceMonth = next;
+            renderAttendanceTab({ quiet: true, skipFetch: true });
         }
 
         function eventRsvpLocked(ev) {
@@ -5933,6 +6027,11 @@
             }
             const userEmail = decodeURIComponent(encodedEmail || '').trim().toLowerCase();
             if (!userEmail) return;
+            const markedEvent = (attendanceTabCache?.events || []).find(ev => Number(ev.id) === Number(eventId));
+            if (markedEvent && !attendanceRollCallOpen(markedEvent)) {
+                showAppNotice('Η καταχώρηση παρουσίας ανοίγει μία ώρα μετά την έναρξη.');
+                return;
+            }
             const view = captureAttendanceView(eventId, userEmail);
             const { data: existing } = await supabaseClient
                 .from('event_responses')
@@ -6407,7 +6506,7 @@
                 return ws;
             };
 
-            const perEvent = [['Εκδήλωση', 'Ημερομηνία', 'Ώρα', 'Παρουσίες', 'Απουσίες']];
+            const perEvent = [['Εκδήλωση', 'Τύπος', 'Ημερομηνία', 'Μήνας', 'Ώρα', 'Παρουσίες', 'Απουσίες']];
             endedEvents.forEach(ev => {
                 let present = 0;
                 let absent = 0;
@@ -6417,9 +6516,12 @@
                     if (actual === 'present') present++;
                     else if (actual === 'absent') absent++;
                 });
+                const ym = eventYearMonth(ev);
                 perEvent.push([
                     ev.event_name || '',
+                    eventKindLabel(ev),
                     ev.date ? String(ev.date).split('T')[0] : '',
+                    ym ? `${ym} ${GREEK_MONTHS[Number(ym.slice(5)) - 1] || ''}`.trim() : '',
                     formatEventClockRange(ev),
                     present,
                     absent
@@ -6444,13 +6546,24 @@
             const perPersonRehearsals = [['Μουσικός', 'Παρουσίες', 'Απουσίες'], ...tallyFor(rehearsalEnded)];
             const perPersonTotal = [['Μουσικός', 'Συνολικές Παρουσίες', 'Συνολικές Απουσίες'], ...tallyFor(endedEvents)];
 
-            const detail = [['Εκδήλωση', 'Ημερομηνία', 'Ώρα', 'Μουσικός', 'Όργανο', 'Κατάσταση', 'Αιτιολογία', 'Πραγματική παρουσία']];
+            const perMonth = [['Μήνας', 'Τύπος', 'Μουσικός', 'Παρουσίες', 'Απουσίες']];
+            [...new Set(endedEvents.map(eventYearMonth).filter(Boolean))].sort().forEach(ym => {
+                ['Πρόβα', 'Εκδήλωση'].forEach(kind => {
+                    const list = endedEvents.filter(ev => eventYearMonth(ev) === ym && eventKindLabel(ev) === kind);
+                    if (!list.length) return;
+                    const monthLabel = `${ym} ${GREEK_MONTHS[Number(ym.slice(5)) - 1] || ''}`.trim();
+                    tallyFor(list).forEach(row => perMonth.push([monthLabel, kind, row[0], row[1], row[2]]));
+                });
+            });
+
+            const detail = [['Εκδήλωση', 'Τύπος', 'Ημερομηνία', 'Ώρα', 'Μουσικός', 'Όργανο', 'Κατάσταση', 'Αιτιολογία', 'Πραγματική παρουσία']];
             endedEvents.forEach(ev => {
                 musicians.forEach(p => {
                     const email = String(p.email || '').trim().toLowerCase();
                     const row = responseFor(ev.id, email);
                     detail.push([
                         ev.event_name || '',
+                        eventKindLabel(ev),
                         ev.date ? String(ev.date).split('T')[0] : '',
                         formatEventClockRange(ev),
                         musicianFullName(p, email),
@@ -6464,6 +6577,7 @@
 
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, sheetFromRows(perEvent), 'Ανά εκδήλωση');
+            XLSX.utils.book_append_sheet(wb, sheetFromRows(perMonth), 'Ανά μήνα');
             XLSX.utils.book_append_sheet(wb, sheetFromRows(perPersonEvents), 'Άτομο - Εκδηλώσεις');
             XLSX.utils.book_append_sheet(wb, sheetFromRows(perPersonRehearsals), 'Άτομο - Πρόβες');
             XLSX.utils.book_append_sheet(wb, sheetFromRows(perPersonTotal), 'Άτομο - Σύνολο');
